@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .btn {
+            transition: all 0.2s;
+            font-weight: 500;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        .btn-primary {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background-color: #2563eb;
+        }
+        .btn-success {
+            background-color: #10b981;
+            color: white;
+        }
+        .btn-success:hover:not(:disabled) {
+            background-color: #059669;
+        }
+        .select-custom {
+            background-color: white;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            color: #374151;
+            width: auto;
+            min-width: 150px;
+        }
+        .textarea-custom {
+            resize: none;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            width: 100%;
+            min-height: 120px;
+            background-color: white;
+            color: #374151;
+            transition: border-color 0.2s;
+        }
+        .textarea-custom:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .video-card {
+            transition: transform 0.2s;
+        }
+        .video-card:hover {
+            transform: translateY(-2px);
+        }
+        .quality-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            background-color: #3b82f6;
+            color: white;
+            font-weight: 500;
+        }
+        .download-progress {
+            margin-top: 1rem;
+            background-color: #f3f4f6;
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+        .download-progress-bar {
+            height: 0.5rem;
+            background-color: #3b82f6;
+            transition: width 0.2s;
+        }
+    </style>
+</head>
+<body class="min-h-screen py-8 px-4">
+    <div class="container">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-900 mb-2">Video Downloader</h1>
+            <p class="text-gray-600">Download videos from YouTube and Instagram</p>
+        </header>
+
+        <div class="card p-6 mb-8">
+            <div class="mb-6">
+                <label for="urls" class="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Video URLs
+                    <span class="text-gray-500 text-xs">(one per line)</span>
+                </label>
+                <textarea 
+                    id="urls" 
+                    class="textarea-custom"
+                    placeholder="https://youtube.com/watch?v=...&#10;https://instagram.com/p/..."
+                ></textarea>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-4">
+                <button id="checkUrls" class="btn btn-primary">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                    Check URLs
+                </button>
+                <button id="quickDownload" class="btn btn-success">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                    Quick Download All
+                </button>
+                <select id="quality" class="select-custom">
+                    <option value="highest">Highest Quality</option>
+                    <option value="1080p">1080p</option>
+                    <option value="720p">720p</option>
+                    <option value="480p">480p</option>
+                    <option value="360p">360p</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="messages" class="space-y-2 mb-8"></div>
+
+        <div id="downloadSection" class="hidden">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-semibold text-gray-900">Available Videos</h2>
+                <div class="flex items-center gap-4">
+                    <span id="selectedCount" class="text-gray-600 text-sm font-medium">0 videos selected</span>
+                    <button id="downloadSelected" class="btn btn-success" disabled>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                        </svg>
+                        Download Selected
+                    </button>
+                </div>
+            </div>
+            <div id="videoList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        </div>
+    </div>
+
+    <template id="videoCardTemplate">
+        <div class="video-card card overflow-hidden">
+            <div class="relative">
+                <img src="" alt="" class="w-full h-48 object-cover">
+                <span class="quality-badge absolute top-3 right-3"></span>
+            </div>
+            <div class="p-4">
+                <h3 class="font-semibold text-gray-900 mb-1 truncate"></h3>
+                <p class="text-gray-600 text-sm mb-3"></p>
+                <div class="flex items-center justify-between">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" class="video-select w-4 h-4 text-blue-600 rounded">
+                        <span class="text-sm text-gray-700">Select</span>
+                    </label>
+                </div>
+                <div class="download-progress hidden">
+                    <div class="download-progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script>
+        const videoList = document.getElementById('videoList');
+        const urlsTextarea = document.getElementById('urls');
+        const checkUrlsButton = document.getElementById('checkUrls');
+        const downloadSection = document.getElementById('downloadSection');
+        const qualitySelect = document.getElementById('quality');
+        const downloadSelectedButton = document.getElementById('downloadSelected');
+        const selectedCountSpan = document.getElementById('selectedCount');
+        const videoCardTemplate = document.getElementById('videoCardTemplate');
+        const messagesDiv = document.getElementById('messages');
+        const quickDownloadButton = document.getElementById('quickDownload');
+
+        let videos = [];
+        let downloadQueue = [];
+        let isDownloading = false;
+
+        function showMessage(message, type = 'error') {
+            const div = document.createElement('div');
+            div.className = `p-4 mb-4 rounded ${type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
+            div.textContent = message;
+            messagesDiv.appendChild(div);
+            setTimeout(() => div.remove(), 5000);
+        }
+
+        function updateProgressBar(videoCard, progress) {
+            const progressBar = videoCard.querySelector('.download-progress');
+            const progressBarInner = videoCard.querySelector('.download-progress-bar');
+            if (progress === 0) {
+                progressBar.classList.remove('hidden');
+            }
+            progressBarInner.style.width = `${progress}%`;
+            if (progress === 100) {
+                setTimeout(() => progressBar.classList.add('hidden'), 1000);
+            }
+        }
+
+        async function downloadFile(url, filename, videoCard) {
+            try {
+                updateProgressBar(videoCard, 0);
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const reader = response.body.getReader();
+                const contentLength = +response.headers.get('Content-Length');
+                
+                let receivedLength = 0;
+                const chunks = [];
+                
+                while(true) {
+                    const {done, value} = await reader.read();
+                    
+                    if (done) {
+                        break;
+                    }
+                    
+                    chunks.push(value);
+                    receivedLength += value.length;
+                    
+                    const progress = (receivedLength / contentLength) * 100;
+                    updateProgressBar(videoCard, progress);
+                }
+                
+                updateProgressBar(videoCard, 100);
+                
+                const blob = new Blob(chunks);
+                const blobUrl = window.URL.createObjectURL(blob);
+                
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(blobUrl);
+                
+                return true;
+            } catch (error) {
+                console.error('Download error:', error);
+                updateProgressBar(videoCard, 0);
+                throw error;
+            }
+        }
+
+        async function processDownloadQueue() {
+            if (isDownloading || downloadQueue.length === 0) return;
+            
+            isDownloading = true;
+            const item = downloadQueue[0];
+            const videoCard = document.querySelector(`.video-card[data-url="${item.url}"]`) || 
+                            createTempVideoCard(item.title);
+            
+            try {
+                showMessage(`Starting download: ${item.title}`, 'success');
+                if (!item.filename) {
+                    const response = await fetch('/api/download', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            urls: [item.url],
+                            quality: qualitySelect.value
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const results = await response.json();
+                    const result = results[0];
+                    if (!result.success) {
+                        throw new Error(result.error || 'Download failed');
+                    }
+                    item.filename = result.filename;
+                }
+
+                await downloadFile(`/api/download/${item.filename}`, item.filename, videoCard);
+                showMessage(`Successfully downloaded: ${item.title}`, 'success');
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage(`Error downloading ${item.title}: ${error.message}`);
+            } finally {
+                downloadQueue.shift();
+                isDownloading = false;
+                if (downloadQueue.length > 0) {
+                    setTimeout(processDownloadQueue, 1000);
+                } else {
+                    downloadSelectedButton.disabled = false;
+                    downloadSelectedButton.textContent = 'Download Selected';
+                    quickDownloadButton.disabled = false;
+                    quickDownloadButton.textContent = 'Quick Download All';
+                }
+            }
+        }
+
+        function createTempVideoCard(title) {
+            const card = videoCardTemplate.content.cloneNode(true);
+            const cardDiv = card.querySelector('.video-card');
+            cardDiv.querySelector('h3').textContent = title;
+            cardDiv.querySelector('.video-select').style.display = 'none';
+            videoList.appendChild(cardDiv);
+            return cardDiv;
+        }
+
+        async function checkUrls(urls) {
+            if (urls.length === 0) {
+                showMessage('Please enter at least one URL');
+                return null;
+            }
+
+            try {
+                console.log('Sending video info request:', urls);
+                const response = await fetch('/api/video-info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage(`Error: ${error.message}`);
+                return null;
+            }
+        }
+
+        async function startDownload(urls, skipPreview = false) {
+            if (skipPreview) {
+                quickDownloadButton.disabled = true;
+                quickDownloadButton.textContent = 'Downloading...';
+                downloadSection.classList.add('hidden');
+                videoList.innerHTML = '';
+                
+                const results = await checkUrls(urls);
+                if (!results) return;
+
+                downloadQueue = results.map(result => ({
+                    url: result.url,
+                    title: result.title || 'Unknown Title'
+                }));
+                
+                processDownloadQueue();
+            } else {
+                checkUrlsButton.disabled = true;
+                checkUrlsButton.textContent = 'Checking...';
+                videoList.innerHTML = '';
+                messagesDiv.innerHTML = '';
+                videos = [];
+                downloadQueue = [];
+
+                const results = await checkUrls(urls);
+                if (!results) {
+                    checkUrlsButton.disabled = false;
+                    checkUrlsButton.textContent = 'Check URLs';
+                    return;
+                }
+
+                videos = results;
+
+                // Update quality select options
+                const qualities = new Set();
+                results.forEach(video => {
+                    if (video.qualities) {
+                        video.qualities.forEach(quality => qualities.add(quality));
+                    }
+                });
+
+                qualitySelect.innerHTML = '<option value="highest">Highest Quality</option>';
+                qualities.forEach(quality => {
+                    if (quality !== 'highest') {
+                        qualitySelect.innerHTML += `<option value="${quality}">${quality}</option>`;
+                    }
+                });
+
+                // Create video cards
+                results.forEach((video, index) => {
+                    if (video.error) {
+                        showMessage(`Error with URL ${video.url}: ${video.error}`);
+                        return;
+                    }
+
+                    const card = videoCardTemplate.content.cloneNode(true);
+                    const cardDiv = card.querySelector('.video-card');
+                    cardDiv.setAttribute('data-url', video.url);
+                    
+                    const img = card.querySelector('img');
+                    img.src = video.thumbnail || 'https://via.placeholder.com/300x200';
+                    img.alt = video.title;
+
+                    card.querySelector('h3').textContent = video.title;
+                    card.querySelector('p').textContent = video.author;
+                    card.querySelector('.quality-badge').textContent = video.qualities ? video.qualities[0] : 'N/A';
+
+                    const checkbox = card.querySelector('.video-select');
+                    checkbox.value = index;
+                    checkbox.addEventListener('change', updateSelectedCount);
+
+                    videoList.appendChild(card);
+                });
+
+                if (results.some(video => !video.error)) {
+                    downloadSection.classList.remove('hidden');
+                    showMessage('Videos found! Select quality and click Download Selected', 'success');
+                }
+
+                checkUrlsButton.disabled = false;
+                checkUrlsButton.textContent = 'Check URLs';
+            }
+        }
+
+        // Quick Download button handler
+        quickDownloadButton.addEventListener('click', async () => {
+            const urls = urlsTextarea.value.split('\n').filter(url => url.trim());
+            await startDownload(urls, true);
+        });
+
+        // Check URLs button handler
+        checkUrlsButton.addEventListener('click', async () => {
+            const urls = urlsTextarea.value.split('\n').filter(url => url.trim());
+            await startDownload(urls, false);
+        });
+
+        // Download Selected button handler
+        downloadSelectedButton.addEventListener('click', async () => {
+            const selectedIndices = Array.from(document.querySelectorAll('.video-select:checked')).map(cb => parseInt(cb.value));
+            const selectedVideos = selectedIndices.map(i => videos[i]);
+            
+            if (selectedVideos.length === 0) {
+                showMessage('Please select at least one video to download');
+                return;
+            }
+
+            downloadSelectedButton.disabled = true;
+            downloadSelectedButton.textContent = 'Downloading...';
+            
+            downloadQueue = selectedVideos.map(video => ({
+                url: video.url,
+                title: video.title
+            }));
+            
+            processDownloadQueue();
+        });
+
+        function updateSelectedCount() {
+            const selectedCount = document.querySelectorAll('.video-select:checked').length;
+            selectedCountSpan.textContent = `${selectedCount} videos selected`;
+            downloadSelectedButton.disabled = selectedCount === 0;
+        }
+    </script>
+</body>
+</html>
