@@ -6,6 +6,7 @@
     <title>Video Downloader</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -189,159 +190,55 @@
     </template>
 
     <script>
+        // DOM Elements
         const videoList = document.getElementById('videoList');
         const urlsTextarea = document.getElementById('urls');
         const checkUrlsButton = document.getElementById('checkUrls');
+        const quickDownloadButton = document.getElementById('quickDownload');
         const downloadSection = document.getElementById('downloadSection');
         const qualitySelect = document.getElementById('quality');
         const downloadSelectedButton = document.getElementById('downloadSelected');
         const selectedCountSpan = document.getElementById('selectedCount');
-        const videoCardTemplate = document.getElementById('videoCardTemplate');
         const messagesDiv = document.getElementById('messages');
-        const quickDownloadButton = document.getElementById('quickDownload');
 
-        let videos = [];
-        let downloadQueue = [];
-        let isDownloading = false;
-
+        // Show message function
         function showMessage(message, type = 'error') {
             const div = document.createElement('div');
-            div.className = `p-4 mb-4 rounded ${type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
+            div.className = `p-4 rounded-lg ${type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
             div.textContent = message;
             messagesDiv.appendChild(div);
-            setTimeout(() => div.remove(), 5000);
+            setTimeout(() => div.remove(), 10000); // Show for 10 seconds
         }
 
-        function updateProgressBar(videoCard, progress) {
-            const progressBar = videoCard.querySelector('.download-progress');
-            const progressBarInner = videoCard.querySelector('.download-progress-bar');
-            if (progress === 0) {
-                progressBar.classList.remove('hidden');
-            }
-            progressBarInner.style.width = `${progress}%`;
-            if (progress === 100) {
-                setTimeout(() => progressBar.classList.add('hidden'), 1000);
-            }
+        // Format duration function
+        function formatDuration(seconds) {
+            if (!seconds) return 'Unknown duration';
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
         }
 
-        async function downloadFile(url, filename, videoCard) {
-            try {
-                updateProgressBar(videoCard, 0);
-                const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                
-                const reader = response.body.getReader();
-                const contentLength = +response.headers.get('Content-Length');
-                
-                let receivedLength = 0;
-                const chunks = [];
-                
-                while(true) {
-                    const {done, value} = await reader.read();
-                    
-                    if (done) {
-                        break;
-                    }
-                    
-                    chunks.push(value);
-                    receivedLength += value.length;
-                    
-                    const progress = (receivedLength / contentLength) * 100;
-                    updateProgressBar(videoCard, progress);
-                }
-                
-                updateProgressBar(videoCard, 100);
-                
-                const blob = new Blob(chunks);
-                const blobUrl = window.URL.createObjectURL(blob);
-                
-                const link = document.createElement('a');
-                link.href = blobUrl;
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                window.URL.revokeObjectURL(blobUrl);
-                
-                return true;
-            } catch (error) {
-                console.error('Download error:', error);
-                updateProgressBar(videoCard, 0);
-                throw error;
-            }
+        // Update selected count
+        function updateSelectedCount() {
+            const selectedCount = document.querySelectorAll('.video-select:checked').length;
+            selectedCountSpan.textContent = `${selectedCount} videos selected`;
+            downloadSelectedButton.disabled = selectedCount === 0;
         }
 
-        async function processDownloadQueue() {
-            if (isDownloading || downloadQueue.length === 0) return;
-            
-            isDownloading = true;
-            const item = downloadQueue[0];
-            const videoCard = document.querySelector(`.video-card[data-url="${item.url}"]`) || 
-                            createTempVideoCard(item.title);
-            
-            try {
-                showMessage(`Starting download: ${item.title}`, 'success');
-                if (!item.filename) {
-                    const response = await fetch('/api/download', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            urls: [item.url],
-                            quality: qualitySelect.value
-                        })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const results = await response.json();
-                    const result = results[0];
-                    if (!result.success) {
-                        throw new Error(result.error || 'Download failed');
-                    }
-                    item.filename = result.filename;
-                }
-
-                await downloadFile(`/api/download/${item.filename}`, item.filename, videoCard);
-                showMessage(`Successfully downloaded: ${item.title}`, 'success');
-            } catch (error) {
-                console.error('Error:', error);
-                showMessage(`Error downloading ${item.title}: ${error.message}`);
-            } finally {
-                downloadQueue.shift();
-                isDownloading = false;
-                if (downloadQueue.length > 0) {
-                    setTimeout(processDownloadQueue, 1000);
-                } else {
-                    downloadSelectedButton.disabled = false;
-                    downloadSelectedButton.textContent = 'Download Selected';
-                    quickDownloadButton.disabled = false;
-                    quickDownloadButton.textContent = 'Quick Download All';
-                }
-            }
-        }
-
-        function createTempVideoCard(title) {
-            const card = videoCardTemplate.content.cloneNode(true);
-            const cardDiv = card.querySelector('.video-card');
-            cardDiv.querySelector('h3').textContent = title;
-            cardDiv.querySelector('.video-select').style.display = 'none';
-            videoList.appendChild(cardDiv);
-            return cardDiv;
-        }
-
+        // Check URLs function
         async function checkUrls(urls) {
-            if (urls.length === 0) {
+            if (!urls || urls.length === 0) {
                 showMessage('Please enter at least one URL');
                 return null;
             }
 
+            console.log('Checking URLs:', urls);
             try {
-                console.log('Sending video info request:', urls);
                 const response = await fetch('/api/video-info', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
                     body: JSON.stringify({ urls })
                 });
 
@@ -349,7 +246,27 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                return await response.json();
+                const data = await response.json();
+                console.log('Raw API Response:', data);
+
+                if (data.error) {
+                    showMessage(data.error);
+                    return null;
+                }
+
+                // Show any errors from the backend
+                if (data.errors && data.errors.length > 0) {
+                    data.errors.forEach(error => showMessage(error));
+                }
+
+                // Ensure videos is an array
+                if (!data.videos || !Array.isArray(data.videos)) {
+                    console.error('Invalid videos data:', data);
+                    showMessage('Invalid response from server');
+                    return null;
+                }
+
+                return data.videos;
             } catch (error) {
                 console.error('Error:', error);
                 showMessage(`Error: ${error.message}`);
@@ -357,128 +274,199 @@
             }
         }
 
+        // Display videos function
+        function displayVideos(videos) {
+            videoList.innerHTML = '';
+            downloadSection.classList.remove('hidden');
+
+            videos.forEach(video => {
+                const template = document.getElementById('videoCardTemplate');
+                const clone = template.content.cloneNode(true);
+                
+                const img = clone.querySelector('img');
+                img.src = video.thumbnail || 'placeholder.jpg';
+                img.alt = video.title;
+
+                const title = clone.querySelector('h3');
+                title.textContent = video.title;
+
+                const duration = clone.querySelector('p');
+                duration.textContent = formatDuration(video.duration);
+
+                const checkbox = clone.querySelector('input[type="checkbox"]');
+                checkbox.dataset.url = video.url;
+                checkbox.addEventListener('change', updateSelectedCount);
+
+                const card = clone.querySelector('.video-card');
+                card.dataset.url = video.url;
+
+                videoList.appendChild(clone);
+            });
+        }
+
+        // Main download function
         async function startDownload(urls, skipPreview = false) {
-            if (skipPreview) {
-                quickDownloadButton.disabled = true;
-                quickDownloadButton.textContent = 'Downloading...';
-                downloadSection.classList.add('hidden');
-                videoList.innerHTML = '';
-                
-                const results = await checkUrls(urls);
-                if (!results) return;
+            console.log('Starting download process for URLs:', urls);
+            
+            if (!urls || urls.length === 0) {
+                showMessage('Please enter at least one URL');
+                return;
+            }
 
-                downloadQueue = results.map(result => ({
-                    url: result.url,
-                    title: result.title || 'Unknown Title'
-                }));
-                
-                processDownloadQueue();
-            } else {
-                checkUrlsButton.disabled = true;
-                checkUrlsButton.textContent = 'Checking...';
-                videoList.innerHTML = '';
-                messagesDiv.innerHTML = '';
-                videos = [];
-                downloadQueue = [];
+            try {
+                const videos = await checkUrls(urls);
+                console.log('Checked videos:', videos);
 
-                const results = await checkUrls(urls);
-                if (!results) {
-                    checkUrlsButton.disabled = false;
-                    checkUrlsButton.textContent = 'Check URLs';
+                if (!videos || !Array.isArray(videos) || videos.length === 0) {
+                    showMessage('No valid videos found');
                     return;
                 }
 
-                videos = results;
-
-                // Update quality select options
-                const qualities = new Set();
-                results.forEach(video => {
-                    if (video.qualities) {
-                        video.qualities.forEach(quality => qualities.add(quality));
-                    }
-                });
-
-                qualitySelect.innerHTML = '<option value="highest">Highest Quality</option>';
-                qualities.forEach(quality => {
-                    if (quality !== 'highest') {
-                        qualitySelect.innerHTML += `<option value="${quality}">${quality}</option>`;
-                    }
-                });
-
-                // Create video cards
-                results.forEach((video, index) => {
-                    if (video.error) {
-                        showMessage(`Error with URL ${video.url}: ${video.error}`);
-                        return;
-                    }
-
-                    const card = videoCardTemplate.content.cloneNode(true);
-                    const cardDiv = card.querySelector('.video-card');
-                    cardDiv.setAttribute('data-url', video.url);
+                if (skipPreview) {
+                    quickDownloadButton.disabled = true;
+                    quickDownloadButton.textContent = 'Downloading...';
                     
-                    const img = card.querySelector('img');
-                    img.src = video.thumbnail || 'https://via.placeholder.com/300x200';
-                    img.alt = video.title;
+                    try {
+                        const videoUrls = videos.map(v => v.url);
+                        console.log('Sending URLs for download:', videoUrls);
+                        
+                        const response = await fetch('/api/download', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                urls: videoUrls,
+                                quality: qualitySelect.value
+                            })
+                        });
 
-                    card.querySelector('h3').textContent = video.title;
-                    card.querySelector('p').textContent = video.author;
-                    card.querySelector('.quality-badge').textContent = video.qualities ? video.qualities[0] : 'N/A';
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
 
-                    const checkbox = card.querySelector('.video-select');
-                    checkbox.value = index;
-                    checkbox.addEventListener('change', updateSelectedCount);
+                        const downloadData = await response.json();
+                        console.log('Download response:', downloadData);
 
-                    videoList.appendChild(card);
-                });
-
-                if (results.some(video => !video.error)) {
-                    downloadSection.classList.remove('hidden');
-                    showMessage('Videos found! Select quality and click Download Selected', 'success');
+                        if (downloadData.error) {
+                            showMessage(`Download error: ${downloadData.error}`, 'error');
+                        } else if (Array.isArray(downloadData)) {
+                            downloadData.forEach((result, index) => {
+                                if (result.error) {
+                                    showMessage(`Failed to download video ${index + 1}: ${result.error}`, 'error');
+                                } else {
+                                    // Create download link
+                                    const link = document.createElement('a');
+                                    link.href = result.download_url;
+                                    link.download = result.filename;
+                                    link.style.display = 'none';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    
+                                    const title = result.title || `Video ${index + 1}`;
+                                    showMessage(`Downloading: ${title}`, 'success');
+                                }
+                            });
+                        } else {
+                            showMessage('Invalid response from server', 'error');
+                        }
+                    } catch (error) {
+                        console.error('Download error:', error);
+                        showMessage(`Download error: ${error.message}`, 'error');
+                    } finally {
+                        quickDownloadButton.disabled = false;
+                        quickDownloadButton.textContent = 'Quick Download All';
+                    }
+                } else {
+                    checkUrlsButton.disabled = true;
+                    checkUrlsButton.textContent = 'Checking...';
+                    displayVideos(videos);
+                    checkUrlsButton.disabled = false;
+                    checkUrlsButton.textContent = 'Check URLs';
                 }
-
+            } catch (error) {
+                console.error('Error in startDownload:', error);
+                showMessage(`Error: ${error.message}`);
                 checkUrlsButton.disabled = false;
                 checkUrlsButton.textContent = 'Check URLs';
+                quickDownloadButton.disabled = false;
+                quickDownloadButton.textContent = 'Quick Download All';
             }
         }
 
-        // Quick Download button handler
-        quickDownloadButton.addEventListener('click', async () => {
-            const urls = urlsTextarea.value.split('\n').filter(url => url.trim());
-            await startDownload(urls, true);
-        });
-
-        // Check URLs button handler
+        // Event Listeners
         checkUrlsButton.addEventListener('click', async () => {
             const urls = urlsTextarea.value.split('\n').filter(url => url.trim());
             await startDownload(urls, false);
         });
 
-        // Download Selected button handler
+        quickDownloadButton.addEventListener('click', async () => {
+            const urls = urlsTextarea.value.split('\n').filter(url => url.trim());
+            await startDownload(urls, true);
+        });
+
         downloadSelectedButton.addEventListener('click', async () => {
-            const selectedIndices = Array.from(document.querySelectorAll('.video-select:checked')).map(cb => parseInt(cb.value));
-            const selectedVideos = selectedIndices.map(i => videos[i]);
+            const selectedCheckboxes = document.querySelectorAll('.video-select:checked');
+            const selectedUrls = Array.from(selectedCheckboxes).map(checkbox => checkbox.dataset.url);
             
-            if (selectedVideos.length === 0) {
+            if (selectedUrls.length === 0) {
                 showMessage('Please select at least one video to download');
                 return;
             }
 
             downloadSelectedButton.disabled = true;
             downloadSelectedButton.textContent = 'Downloading...';
-            
-            downloadQueue = selectedVideos.map(video => ({
-                url: video.url,
-                title: video.title
-            }));
-            
-            processDownloadQueue();
-        });
 
-        function updateSelectedCount() {
-            const selectedCount = document.querySelectorAll('.video-select:checked').length;
-            selectedCountSpan.textContent = `${selectedCount} videos selected`;
-            downloadSelectedButton.disabled = selectedCount === 0;
-        }
+            try {
+                const videos = await checkUrls(selectedUrls);
+                if (videos && videos.length > 0) {
+                    const response = await fetch('/api/download', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            urls: videos.map(v => v.url),
+                            quality: qualitySelect.value
+                        })
+                    });
+
+                    const downloadData = await response.json();
+                    console.log('Download response:', downloadData);
+
+                    if (Array.isArray(downloadData)) {
+                        downloadData.forEach((result, index) => {
+                            const video = videos[index];
+                            if (result.error) {
+                                showMessage(`Failed to download ${video.title}: ${result.error}`, 'error');
+                            } else {
+                                // Create download link
+                                const link = document.createElement('a');
+                                link.href = result.download_url;
+                                link.download = result.filename;
+                                link.style.display = 'none';
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                
+                                showMessage(`Started downloading: ${video.title}`, 'success');
+                            }
+                        });
+                    } else if (downloadData.error) {
+                        showMessage(`Download error: ${downloadData.error}`, 'error');
+                    } else {
+                        showMessage('Invalid response from server', 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Download error:', error);
+                showMessage(`Download error: ${error.message}`, 'error');
+            }
+
+            downloadSelectedButton.disabled = false;
+            downloadSelectedButton.textContent = 'Download Selected';
+        });
     </script>
 </body>
 </html>

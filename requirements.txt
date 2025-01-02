@@ -1,9 +1,8 @@
 Flask==2.0.1
 gunicorn==20.1.0
 yt-dlp==2023.12.30
-instaloader==4.10.1
 requests==2.31.0
 Werkzeug==2.0.1
 Flask-Cors==4.0.0
 python-dotenv==0.19.0
-tqdm
+tqdm==4.66.1
