@@ -75,19 +75,30 @@ def get_yt_dlp_opts(quality='best'):
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
-        'extractor_args': {'youtube': {
-            'skip': ['dash', 'hls'],
-            'player_skip': ['js', 'configs', 'webpage']
-        }},
+        'extractor_args': {
+            'youtube': {
+                'skip': ['dash', 'hls'],
+                'player_skip': ['js', 'configs', 'webpage']
+            },
+            'instagram': {
+                'skip': ['dash', 'hls'],
+                'player_skip': ['js', 'configs']
+            }
+        },
         'extractor_retries': 5,
         'file_access_retries': 5,
         'hls_prefer_native': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Mobile/15E148 Safari/604.1',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
         }
     }
 
@@ -97,10 +108,14 @@ def get_video_info(url):
         
         # Try different user agents if the first one fails
         user_agents = [
+            # Mobile User Agents (better for shorts and reels)
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Mobile/15E148 Safari/604.1',
+            'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1',
+            # Desktop User Agents
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/121.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
         ]
         
         last_error = None
@@ -109,23 +124,41 @@ def get_video_info(url):
                 ydl_opts = get_yt_dlp_opts()
                 ydl_opts['http_headers']['User-Agent'] = user_agent
                 
+                # Add cookies for Instagram
+                if 'instagram.com' in url:
+                    ydl_opts.update({
+                        'cookiesfrombrowser': ('chrome',),  # Try to get cookies from Chrome
+                        'cookiefile': 'cookies.txt'  # Also try cookies from file
+                    })
+                
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    logger.info(f"Trying with user agent: {user_agent}")
                     info = ydl.extract_info(url, download=False)
+                    
                     if not info:
+                        logger.warning(f"No info found with user agent: {user_agent}")
                         continue
                     
                     # For playlists or channels, get the first video
                     if 'entries' in info:
                         if not info['entries']:
+                            logger.warning(f"No entries found in playlist with user agent: {user_agent}")
                             continue
                         info = info['entries'][0]
                     
+                    # Check if we got a valid video URL
+                    if not info.get('url') and not info.get('formats'):
+                        logger.warning(f"No video URL found with user agent: {user_agent}")
+                        continue
+                    
+                    logger.info(f"Successfully got video info with user agent: {user_agent}")
                     return {
                         'url': url,
                         'title': info.get('title', 'Unknown Title'),
                         'duration': info.get('duration', 0),
                         'thumbnail': info.get('thumbnail', None),
-                        'webpage_url': info.get('webpage_url', url)
+                        'webpage_url': info.get('webpage_url', url),
+                        'formats': info.get('formats', [])
                     }
             except Exception as e:
                 last_error = str(e)
@@ -212,7 +245,7 @@ def download_video():
 
         # Convert quality setting to yt-dlp format string
         if quality == 'highest':
-            format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            format_string = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best'
         else:
             height = quality.replace('p', '')  # Convert '1080p' to '1080'
             format_string = f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best'
@@ -244,6 +277,13 @@ def download_video():
                     'outtmpl': output_path,
                     'progress_hooks': [lambda d: handle_progress(d, filename)]
                 }
+
+                # Add cookies for Instagram
+                if 'instagram.com' in url:
+                    ydl_opts.update({
+                        'cookiesfrombrowser': ('chrome',),
+                        'cookiefile': 'cookies.txt'
+                    })
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     error_code = ydl.download([url])
@@ -278,6 +318,9 @@ def download_video():
                     'error': error_msg,
                     'status': 'error'
                 })
+        
+        if not any(result.get('status') == 'completed' for result in results):
+            return jsonify({'error': 'No valid videos found', 'details': results}), 400
             
         logger.info(f"Returning results: {results}")
         return jsonify(results)
