@@ -65,40 +65,33 @@ def get_yt_dlp_opts(quality='best'):
         'format': quality,
         'quiet': False,
         'no_warnings': False,
+        'verbose': True,
         'extract_flat': False,
         'socket_timeout': 30,
         'retries': 10,
         'fragment_retries': 10,
         'force_generic_extractor': False,
         'nocheckcertificate': True,
-        'ignoreerrors': True,
+        'ignoreerrors': False,
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
         'extractor_args': {
             'youtube': {
-                'skip': ['dash', 'hls'],
-                'player_skip': ['js', 'configs', 'webpage']
-            },
-            'instagram': {
-                'skip': ['dash', 'hls'],
-                'player_skip': ['js', 'configs']
+                'skip': [],
+                'player_skip': []
             }
         },
-        'extractor_retries': 5,
-        'file_access_retries': 5,
+        'extractor_retries': 10,
+        'file_access_retries': 10,
         'hls_prefer_native': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Mobile/15E148 Safari/604.1',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1'
+            'Referer': 'https://www.youtube.com/'
         }
     }
 
@@ -106,71 +99,55 @@ def get_video_info(url):
     try:
         logger.info(f"Getting info for URL: {url}")
         
-        # Try different user agents if the first one fails
-        user_agents = [
-            # Mobile User Agents (better for shorts and reels)
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Mobile/15E148 Safari/604.1',
-            'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1',
-            # Desktop User Agents
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/121.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
-        ]
+        # For YouTube shorts, convert to regular video URL
+        if '/shorts/' in url:
+            url = url.replace('/shorts/', '/watch?v=')
+            logger.info(f"Converted shorts URL to: {url}")
         
-        last_error = None
-        for user_agent in user_agents:
+        ydl_opts = get_yt_dlp_opts()
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
-                ydl_opts = get_yt_dlp_opts()
-                ydl_opts['http_headers']['User-Agent'] = user_agent
+                logger.info("Starting video extraction...")
+                info = ydl.extract_info(url, download=False)
                 
-                # Add cookies for Instagram
-                if 'instagram.com' in url:
-                    ydl_opts.update({
-                        'cookiesfrombrowser': ('chrome',),  # Try to get cookies from Chrome
-                        'cookiefile': 'cookies.txt'  # Also try cookies from file
-                    })
+                if not info:
+                    logger.error("No info returned from yt-dlp")
+                    raise Exception("No video information found")
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    logger.info(f"Trying with user agent: {user_agent}")
-                    info = ydl.extract_info(url, download=False)
-                    
-                    if not info:
-                        logger.warning(f"No info found with user agent: {user_agent}")
-                        continue
-                    
-                    # For playlists or channels, get the first video
-                    if 'entries' in info:
-                        if not info['entries']:
-                            logger.warning(f"No entries found in playlist with user agent: {user_agent}")
-                            continue
-                        info = info['entries'][0]
-                    
-                    # Check if we got a valid video URL
-                    if not info.get('url') and not info.get('formats'):
-                        logger.warning(f"No video URL found with user agent: {user_agent}")
-                        continue
-                    
-                    logger.info(f"Successfully got video info with user agent: {user_agent}")
-                    return {
-                        'url': url,
-                        'title': info.get('title', 'Unknown Title'),
-                        'duration': info.get('duration', 0),
-                        'thumbnail': info.get('thumbnail', None),
-                        'webpage_url': info.get('webpage_url', url),
-                        'formats': info.get('formats', [])
-                    }
+                # For playlists, get the first video
+                if 'entries' in info:
+                    if not info['entries']:
+                        logger.error("No entries in playlist")
+                        raise Exception("No videos found in playlist")
+                    info = info['entries'][0]
+                
+                # Log available formats
+                if 'formats' in info:
+                    logger.info(f"Available formats: {[f'{f.get('format_id')} - {f.get('ext')} - {f.get('resolution')}' for f in info['formats']]}")
+                else:
+                    logger.warning("No formats available in video info")
+                
+                result = {
+                    'url': url,
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', None),
+                    'webpage_url': info.get('webpage_url', url),
+                    'formats': info.get('formats', [])
+                }
+                logger.info(f"Successfully extracted video info: {result}")
+                return result
+                
             except Exception as e:
-                last_error = str(e)
-                logger.warning(f"Failed with user agent {user_agent}: {e}")
-                continue
-        
-        # If all user agents failed, raise the last error
-        if last_error:
-            raise Exception(f"Failed to get video info: {last_error}")
-        else:
-            raise Exception("No video information found")
-            
+                logger.error(f"Error during extraction: {str(e)}")
+                # Get detailed error info
+                if hasattr(e, 'exc_info'):
+                    logger.error(f"Exception info: {e.exc_info}")
+                if hasattr(e, 'msg'):
+                    logger.error(f"Error message: {e.msg}")
+                raise
+                
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error getting video info: {error_msg}")
@@ -245,10 +222,10 @@ def download_video():
 
         # Convert quality setting to yt-dlp format string
         if quality == 'highest':
-            format_string = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best'
+            format_string = 'best'
         else:
             height = quality.replace('p', '')  # Convert '1080p' to '1080'
-            format_string = f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best'
+            format_string = f'best[height<={height}]'
 
         logger.info(f"Using format string: {format_string}")
 
@@ -256,6 +233,11 @@ def download_video():
         for index, url in enumerate(urls, 1):
             try:
                 logger.info(f"Processing URL {index}: {url}")
+                
+                # Convert shorts URL if needed
+                if '/shorts/' in url:
+                    url = url.replace('/shorts/', '/watch?v=')
+                    logger.info(f"Converted shorts URL to: {url}")
                 
                 # First get video info to get the title
                 info_result = get_video_info(url)
@@ -271,19 +253,21 @@ def download_video():
                 output_path = os.path.join(download_dir, filename)
                 logger.info(f"Will download to: {output_path}")
 
-                # Download the video
+                # Download the video with simpler options
                 ydl_opts = {
-                    **get_yt_dlp_opts(format_string),
+                    'format': format_string,
                     'outtmpl': output_path,
-                    'progress_hooks': [lambda d: handle_progress(d, filename)]
+                    'quiet': False,
+                    'no_warnings': False,
+                    'verbose': True,
+                    'progress_hooks': [lambda d: handle_progress(d, filename)],
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': '*/*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': 'https://www.youtube.com/'
+                    }
                 }
-
-                # Add cookies for Instagram
-                if 'instagram.com' in url:
-                    ydl_opts.update({
-                        'cookiesfrombrowser': ('chrome',),
-                        'cookiefile': 'cookies.txt'
-                    })
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     error_code = ydl.download([url])
