@@ -31,26 +31,45 @@ download_progress = {}
 download_cache = {}
 
 def get_yt_dlp_opts(quality='best'):
+    cookies_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
     return {
         'format': quality,
-        'quiet': True,
-        'no_warnings': True,
+        'quiet': False,  # Set to False to see detailed output
+        'no_warnings': False,  # Set to False to see warnings
         'extract_flat': True,
         'socket_timeout': 30,
-        'retries': 5,
-        'fragment_retries': 5,
+        'retries': 10,
+        'fragment_retries': 10,
         'force_generic_extractor': False,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'referer': 'https://www.youtube.com/',
+        'cookiefile': cookies_file,
         'cookiesfrombrowser': ('chrome',),
         'nocheckcertificate': True,
+        'ignoreerrors': True,
+        'no_color': True,
+        'geo_bypass': True,
+        'geo_bypass_country': 'US',
+        'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
+        'extractor_retries': 5,
+        'file_access_retries': 5,
+        'hls_prefer_native': True,
+        'external_downloader_args': ['--max-connection-per-server', '16'],
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-Dest': 'document'
+            'Sec-Fetch-User': '?1',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'DNT': '1',
+            'Referer': 'https://www.youtube.com/'
         }
     }
 
@@ -110,25 +129,35 @@ def get_videos_info():
 
         for url in urls:
             try:
-                with yt_dlp.YoutubeDL(get_yt_dlp_opts()) as ydl:
+                ydl_opts = get_yt_dlp_opts()
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    logger.info(f"Extracting info for URL: {url}")
                     info = ydl.extract_info(url, download=False)
-                    videos_info.append({
-                        'url': url,
-                        'title': info.get('title', 'Unknown Title'),
-                        'thumbnail': info.get('thumbnail', ''),
-                        'duration': info.get('duration', 0),
-                        'format': info.get('format', ''),
-                        'quality': info.get('quality', 0)
-                    })
+                    if info:
+                        videos_info.append({
+                            'url': url,
+                            'title': info.get('title', 'Unknown Title'),
+                            'thumbnail': info.get('thumbnail', ''),
+                            'duration': info.get('duration', 0),
+                            'format': info.get('format', ''),
+                            'quality': info.get('quality', 0)
+                        })
+                        logger.info(f"Successfully extracted info for: {info.get('title', 'Unknown Title')}")
+                    else:
+                        raise Exception("No video information found")
             except Exception as e:
-                errors.append(f"Error with URL {url}: {str(e)}")
+                error_msg = f"Error with URL {url}: {str(e)}"
+                logger.error(error_msg)
+                errors.append(error_msg)
 
         return jsonify({
             'videos': videos_info,
             'errors': errors
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        logger.error(f"Error in video info endpoint: {error_msg}")
+        return jsonify({'error': error_msg}), 500
 
 @app.route('/api/download', methods=['POST'])
 def download_video():
@@ -144,8 +173,12 @@ def download_video():
         filename = f"video{int(time.time())}.mp4"
         output_path = os.path.join(DOWNLOAD_FOLDER, filename)
 
-        format_string = 'best' if quality == 'highest' else f'best[height<={quality[:-1]}]'
-        
+        # Set format string based on quality
+        if quality == 'highest':
+            format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        else:
+            format_string = f'bestvideo[height<={quality[:-1]}][ext=mp4]+bestaudio[ext=m4a]/best[height<={quality[:-1]}][ext=mp4]/best'
+
         ydl_opts = {
             **get_yt_dlp_opts(format_string),
             'outtmpl': output_path,
@@ -154,11 +187,17 @@ def download_video():
 
         def download_task():
             try:
+                logger.info(f"Starting download for URL: {url}")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+                    error_code = ydl.download([url])
+                    if error_code != 0:
+                        raise Exception(f"yt-dlp returned error code: {error_code}")
+                logger.info(f"Download completed for: {filename}")
             except Exception as e:
-                logger.error(f"Download error: {str(e)}")
-                return jsonify({'error': str(e)}), 500
+                error_msg = f"Download error: {str(e)}"
+                logger.error(error_msg)
+                if os.path.exists(output_path):
+                    os.remove(output_path)
 
         thread = threading.Thread(target=download_task)
         thread.start()
@@ -171,7 +210,7 @@ def download_video():
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"Download error: {error_msg}")
+        logger.error(f"Error in download endpoint: {error_msg}")
         return jsonify({'error': error_msg}), 500
 
 @app.route('/api/progress/<filename>')
