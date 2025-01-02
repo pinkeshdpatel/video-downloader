@@ -75,71 +75,73 @@ def get_yt_dlp_opts(quality='best'):
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
-        'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
+        'extractor_args': {'youtube': {
+            'skip': ['dash', 'hls'],
+            'player_skip': ['js', 'configs', 'webpage']
+        }},
         'extractor_retries': 5,
         'file_access_retries': 5,
         'hls_prefer_native': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         }
     }
 
 def get_video_info(url):
     try:
         logger.info(f"Getting info for URL: {url}")
-        with yt_dlp.YoutubeDL(get_yt_dlp_opts()) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                raise Exception("Could not fetch video information")
+        
+        # Try different user agents if the first one fails
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/121.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ]
+        
+        last_error = None
+        for user_agent in user_agents:
+            try:
+                ydl_opts = get_yt_dlp_opts()
+                ydl_opts['http_headers']['User-Agent'] = user_agent
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if not info:
+                        continue
+                    
+                    # For playlists or channels, get the first video
+                    if 'entries' in info:
+                        if not info['entries']:
+                            continue
+                        info = info['entries'][0]
+                    
+                    return {
+                        'url': url,
+                        'title': info.get('title', 'Unknown Title'),
+                        'duration': info.get('duration', 0),
+                        'thumbnail': info.get('thumbnail', None),
+                        'webpage_url': info.get('webpage_url', url)
+                    }
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Failed with user agent {user_agent}: {e}")
+                continue
+        
+        # If all user agents failed, raise the last error
+        if last_error:
+            raise Exception(f"Failed to get video info: {last_error}")
+        else:
+            raise Exception("No video information found")
             
-            # For playlists or channels, get the first video
-            if 'entries' in info:
-                if not info['entries']:
-                    raise Exception("No videos found in playlist")
-                info = info['entries'][0]
-            
-            return {
-                'url': url,
-                'title': info.get('title', 'Unknown Title'),
-                'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail', None),
-                'webpage_url': info.get('webpage_url', url)
-            }
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error getting video info: {error_msg}")
         return {'error': error_msg}
-
-def handle_progress(d, filename):
-    if d['status'] == 'downloading':
-        try:
-            total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
-            downloaded = d.get('downloaded_bytes', 0)
-            if total > 0:
-                progress = (downloaded / total) * 100
-            else:
-                progress = 0
-            
-            download_progress[filename] = {
-                'status': 'downloading',
-                'progress': progress,
-                'speed': d.get('speed', 0),
-                'eta': d.get('eta', 0)
-            }
-        except Exception as e:
-            logger.error(f"Error updating progress: {str(e)}")
-    
-    elif d['status'] == 'finished':
-        download_progress[filename] = {
-            'status': 'completed',
-            'progress': 100
-        }
-    
-    elif d['status'] == 'error':
-        download_progress[filename] = {
-            'status': 'error',
-            'error': str(d.get('error', 'Unknown error'))
-        }
 
 @app.route('/')
 def index():
@@ -223,19 +225,12 @@ def download_video():
                 logger.info(f"Processing URL {index}: {url}")
                 
                 # First get video info to get the title
-                with yt_dlp.YoutubeDL(get_yt_dlp_opts()) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    if not info:
-                        raise Exception("Could not fetch video information")
-                    
-                    # For playlists, get the first video
-                    if 'entries' in info:
-                        if not info['entries']:
-                            raise Exception("No videos found in playlist")
-                        info = info['entries'][0]
+                info_result = get_video_info(url)
+                if 'error' in info_result:
+                    raise Exception(info_result['error'])
                 
                 # Create filename from video title
-                video_title = info.get('title', f'video{index}')
+                video_title = info_result.get('title', f'video{index}')
                 safe_title = "".join(x for x in video_title if x.isalnum() or x in (' ', '-', '_'))[:50]  # Limit length
                 filename = f"video{index}_{safe_title}.mp4"
                 filename = filename.replace(' ', '_')  # Replace spaces with underscores
@@ -313,6 +308,37 @@ def download_file(filename):
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 404
+
+def handle_progress(d, filename):
+    if d['status'] == 'downloading':
+        try:
+            total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+            downloaded = d.get('downloaded_bytes', 0)
+            if total > 0:
+                progress = (downloaded / total) * 100
+            else:
+                progress = 0
+            
+            download_progress[filename] = {
+                'status': 'downloading',
+                'progress': progress,
+                'speed': d.get('speed', 0),
+                'eta': d.get('eta', 0)
+            }
+        except Exception as e:
+            logger.error(f"Error updating progress: {str(e)}")
+    
+    elif d['status'] == 'finished':
+        download_progress[filename] = {
+            'status': 'completed',
+            'progress': 100
+        }
+    
+    elif d['status'] == 'error':
+        download_progress[filename] = {
+            'status': 'error',
+            'error': str(d.get('error', 'Unknown error'))
+        }
 
 if __name__ == '__main__':
     # Get port from environment variable (Render sets this)
