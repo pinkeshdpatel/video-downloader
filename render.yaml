@@ -3,7 +3,7 @@ services:
     name: video-downloader
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18
@@ -11,3 +11,7 @@ services:
         value: production
       - key: DOWNLOAD_FOLDER
         value: /tmp/downloads
+    disk:
+      name: downloads
+      mountPath: /tmp/downloads
+      sizeGB: 1
