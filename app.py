@@ -1,364 +1,196 @@
 import os
-from flask import Flask, render_template, request, jsonify, send_file
-from flask_cors import CORS
-import yt_dlp
-import instaloader
-from urllib.parse import urlparse
-import json
+from flask import Flask, request, jsonify, send_file
 import time
 import logging
+import yt_dlp
 import requests
 from functools import partial
 import threading
+from proxy_manager import ProxyManager
+from browser_emulator import BrowserEmulator
+from fallback_downloader import FallbackDownloader
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max-limit
 
-# Create downloads directory if it doesn't exist
+# Constants
 DOWNLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads')
-if not os.path.exists(DOWNLOAD_FOLDER):
-    os.makedirs(DOWNLOAD_FOLDER)
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# Global download cache to prevent duplicate downloads
+# Initialize components
+proxy_manager = ProxyManager()
+browser_emulator = BrowserEmulator()
+fallback_downloader = FallbackDownloader(proxy_manager, browser_emulator)
+
+# Global download progress cache
+download_progress = {}
 download_cache = {}
+
+def get_yt_dlp_opts(quality='best'):
+    return {
+        'format': quality,
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': True,
+        'socket_timeout': 30,
+        'retries': 5,
+        'fragment_retries': 5,
+        'force_generic_extractor': False,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://www.youtube.com/',
+        'cookiesfrombrowser': ('chrome',),
+        'nocheckcertificate': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Dest': 'document'
+        }
+    }
 
 def get_video_info(url):
     """Get video information without downloading"""
     try:
-        if 'youtube.com' in url or 'youtu.be' in url:
-            ydl_opts = {
-                'format': 'best',
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': True,
-                'socket_timeout': 30,
-                'retries': 3
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                formats = [f for f in info['formats'] if f.get('ext') == 'mp4' and f.get('format_note')]
-                qualities = sorted(list(set(f['format_note'] for f in formats if f.get('format_note'))))
-                
-                video_info = {
-                    'title': info.get('title', 'Unknown Title'),
-                    'thumbnail': info.get('thumbnail', ''),
-                    'duration': info.get('duration'),
-                    'author': info.get('uploader', 'Unknown Author'),
-                    'qualities': qualities or ['best'],  # Fallback to 'best' if no qualities found
-                    'url': url,
-                    'type': 'youtube'
-                }
-                logger.debug(f"YouTube video info: {video_info}")
-                return video_info
-            
-        elif 'instagram.com' in url:
-            L = instaloader.Instaloader()
-            parsed_url = urlparse(url)
-            shortcode = parsed_url.path.split('/')[-2]
-            post = instaloader.Post.from_shortcode(L.context, shortcode)
-            
-            info = {
-                'title': f'Instagram Video by {post.owner_username}',
-                'thumbnail': post.url,
-                'author': post.owner_username,
-                'qualities': ['default'],
-                'url': url,
-                'type': 'instagram'
-            }
-            logger.debug(f"Instagram video info: {info}")
-            return info
-            
-        else:
-            logger.error(f"Unsupported URL: {url}")
+        ydl_opts = get_yt_dlp_opts()
+        proxy = proxy_manager.get_proxy()
+        if proxy:
+            ydl_opts['proxy'] = proxy.get('http')
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
             return {
-                'error': 'Unsupported platform',
-                'url': url
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', ''),
+                'formats': info.get('formats', [])
             }
-            
     except Exception as e:
-        logger.error(f"Error getting video info: {str(e)}")
-        return {
-            'error': str(e),
-            'url': url
-        }
+        logger.error(f"Error getting video info: {e}")
+        return None
 
 def download_progress_hook(d, progress_key):
-    """Progress hook for yt-dlp"""
+    """Track download progress"""
     if d['status'] == 'downloading':
-        progress = d.get('_percent_str', 'unknown progress')
-        speed = d.get('_speed_str', 'unknown speed')
-        logger.debug(f"Download progress for {progress_key}: {progress} at {speed}")
-    elif d['status'] == 'finished':
-        logger.info(f"Download finished for {progress_key}")
-
-def download_youtube_video(url, quality, filename):
-    """Download YouTube video"""
-    try:
-        logger.info(f"Starting YouTube download: {url} with quality: {quality} to file: {filename}")
-        output_path = os.path.join(DOWNLOAD_FOLDER, filename)
-        
-        # Check if already downloading
-        progress_key = f"{url}_{quality}"
-        if progress_key in download_cache:
-            logger.info(f"Download already in progress for {url}")
-            return False
-            
-        download_cache[progress_key] = True
-        
         try:
-            ydl_opts = {
-                'format': f'bestvideo[ext=mp4][height<={quality[:-1]}]+bestaudio[ext=m4a]/best[ext=mp4]/best' if quality != 'highest' else 'best[ext=mp4]/best',
-                'outtmpl': output_path,
-                'quiet': False,
-                'no_warnings': True,
-                'socket_timeout': 30,
-                'retries': 3,
-                'verbose': True,
-                'progress_hooks': [partial(download_progress_hook, progress_key=progress_key)],
-            }
-            
-            logger.debug(f"YouTube-DL options: {ydl_opts}")
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                try:
-                    logger.info(f"Starting download with yt-dlp for {url}")
-                    ydl.download([url])
-                    logger.info(f"yt-dlp download completed for {url}")
-                except Exception as e:
-                    logger.error(f"Error in yt-dlp download: {str(e)}")
-                    raise
-                
-                if os.path.exists(output_path):
-                    file_size = os.path.getsize(output_path)
-                    logger.info(f"Successfully downloaded: {filename} (size: {file_size} bytes)")
-                    if file_size > 0:
-                        return True
-                    else:
-                        logger.error(f"Downloaded file is empty: {output_path}")
-                        os.remove(output_path)
-                        return False
-                else:
-                    logger.error(f"File not found after download: {output_path}")
-                    return False
-                    
+            total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+            downloaded = d.get('downloaded_bytes', 0)
+            if total > 0:
+                progress = (downloaded / total) * 100
+                download_progress[progress_key] = {
+                    'progress': progress,
+                    'speed': d.get('speed', 0),
+                    'eta': d.get('eta', 0),
+                    'status': 'downloading'
+                }
         except Exception as e:
-            logger.error(f"Error during YouTube download: {str(e)}")
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            return False
-        finally:
-            download_cache.pop(progress_key, None)
-            
-    except Exception as e:
-        logger.error(f"Error in download_youtube_video: {str(e)}")
-        return False
-
-def download_instagram_video(url, filename):
-    """Download Instagram video"""
-    try:
-        logger.info(f"Downloading Instagram video: {url}")
-        L = instaloader.Instaloader()
-        parsed_url = urlparse(url)
-        shortcode = parsed_url.path.split('/')[-2]
-        post = instaloader.Post.from_shortcode(L.context, shortcode)
-        
-        if not post.is_video:
-            logger.error(f"Instagram post is not a video: {url}")
-            return False
-            
-        output_path = os.path.join(DOWNLOAD_FOLDER, filename)
-        temp_dir = os.path.join(DOWNLOAD_FOLDER, 'temp')
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
-            
-        logger.debug(f"Downloading to temp directory: {temp_dir}")
-        L.download_post(post, target=temp_dir)
-        
-        # Find and rename the downloaded video file
-        video_files = [f for f in os.listdir(temp_dir) if f.endswith('.mp4')]
-        if video_files:
-            source_path = os.path.join(temp_dir, video_files[0])
-            logger.debug(f"Moving {source_path} to {output_path}")
-            os.rename(source_path, output_path)
-            
-            # Clean up temp directory
-            for f in os.listdir(temp_dir):
-                os.remove(os.path.join(temp_dir, f))
-            os.rmdir(temp_dir)
-            
-            logger.info(f"Successfully downloaded: {filename}")
-            return True
-        else:
-            logger.error("No video file found after download")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error downloading Instagram video: {str(e)}")
-        return False
+            logger.error(f"Error in progress hook: {e}")
+    elif d['status'] == 'finished':
+        download_progress[progress_key] = {
+            'progress': 100,
+            'status': 'finished'
+        }
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return app.send_static_file('index.html')
 
 @app.route('/api/video-info', methods=['POST'])
-def video_info():
+def get_videos_info():
     try:
         data = request.get_json()
         urls = data.get('urls', [])
-        logger.info(f"Received video info request for {len(urls)} URLs")
-        
-        results = []
+        videos_info = []
+        errors = []
+
         for url in urls:
-            url = url.strip()
-            info = get_video_info(url)
-            if info is None:
-                info = {'error': 'Failed to get video info', 'url': url}
-            results.append(info)
-        
-        return jsonify(results)
-        
+            try:
+                with yt_dlp.YoutubeDL(get_yt_dlp_opts()) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    videos_info.append({
+                        'url': url,
+                        'title': info.get('title', 'Unknown Title'),
+                        'thumbnail': info.get('thumbnail', ''),
+                        'duration': info.get('duration', 0),
+                        'format': info.get('format', ''),
+                        'quality': info.get('quality', 0)
+                    })
+            except Exception as e:
+                errors.append(f"Error with URL {url}: {str(e)}")
+
+        return jsonify({
+            'videos': videos_info,
+            'errors': errors
+        })
     except Exception as e:
-        logger.error(f"Error in video_info endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/download', methods=['POST'])
-def download():
+def download_video():
     try:
         data = request.get_json()
-        urls = data.get('urls', [])
+        url = data.get('url')
         quality = data.get('quality', 'highest')
-        logger.info(f"Received download request for {len(urls)} URLs with quality: {quality}")
         
-        # Clear old files from download folder
-        try:
-            for file in os.listdir(DOWNLOAD_FOLDER):
-                file_path = os.path.join(DOWNLOAD_FOLDER, file)
-                if os.path.isfile(file_path):
-                    try:
-                        os.remove(file_path)
-                        logger.info(f"Removed old file: {file_path}")
-                    except Exception as e:
-                        logger.error(f"Error removing file {file_path}: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error cleaning download folder: {str(e)}")
+        if not url:
+            return jsonify({'error': 'No URL provided'}), 400
+
+        # Create a unique filename
+        filename = f"video{int(time.time())}.mp4"
+        output_path = os.path.join(DOWNLOAD_FOLDER, filename)
+
+        format_string = 'best' if quality == 'highest' else f'best[height<={quality[:-1]}]'
         
-        results = []
-        download_index = 1  # Counter for filenames
-        
-        for url in urls:
+        ydl_opts = {
+            **get_yt_dlp_opts(format_string),
+            'outtmpl': output_path,
+            'progress_hooks': [lambda d: download_progress_hook(d, filename)],
+        }
+
+        def download_task():
             try:
-                url = url.strip()
-                logger.info(f"Processing URL {download_index}: {url}")
-                
-                # Get video info to get title
-                info = get_video_info(url)
-                if info.get('error'):
-                    error_msg = f"Error getting video info: {info['error']}"
-                    logger.error(error_msg)
-                    results.append({
-                        'url': url,
-                        'success': False,
-                        'error': error_msg,
-                        'title': info.get('title', 'Unknown')
-                    })
-                    continue
-                
-                # Use simple numbered filename
-                filename = f'video{download_index}.mp4'
-                output_path = os.path.join(DOWNLOAD_FOLDER, filename)
-                logger.info(f"Using filename: {filename} for {url}")
-                
-                success = False
-                if 'youtube.com' in url or 'youtu.be' in url:
-                    success = download_youtube_video(url, quality, filename)
-                elif 'instagram.com' in url:
-                    success = download_instagram_video(url, filename)
-                
-                # Verify file exists and has size
-                file_exists = os.path.exists(output_path)
-                file_size = os.path.getsize(output_path) if file_exists else 0
-                logger.info(f"File status - exists: {file_exists}, size: {file_size} bytes")
-                
-                if success and file_exists and file_size > 0:
-                    logger.info(f"Download successful: {filename}")
-                    result = {
-                        'url': url,
-                        'success': True,
-                        'filename': filename,
-                        'title': info.get('title', 'Unknown Title')
-                    }
-                    download_index += 1  # Only increment counter for successful downloads
-                else:
-                    error_msg = "Download failed - file not found or empty"
-                    logger.error(error_msg)
-                    result = {
-                        'url': url,
-                        'success': False,
-                        'error': error_msg,
-                        'title': info.get('title', 'Unknown Title')
-                    }
-                
-                results.append(result)
-                logger.info(f"Download result for {url}: {result}")
-                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
             except Exception as e:
-                error_msg = f"Error processing URL {url}: {str(e)}"
-                logger.error(error_msg)
-                results.append({
-                    'url': url,
-                    'success': False,
-                    'error': error_msg,
-                    'title': 'Unknown'
-                })
-        
-        return jsonify(results)
-        
+                logger.error(f"Download error: {str(e)}")
+                return jsonify({'error': str(e)}), 500
+
+        thread = threading.Thread(target=download_task)
+        thread.start()
+            
+        return jsonify({
+            'filename': filename,
+            'status': 'success',
+            'message': 'Download started'
+        })
+
     except Exception as e:
-        error_msg = f"Error in download endpoint: {str(e)}"
-        logger.error(error_msg)
+        error_msg = str(e)
+        logger.error(f"Download error: {error_msg}")
         return jsonify({'error': error_msg}), 500
 
-@app.route('/api/download/<filename>')
+@app.route('/api/progress/<filename>')
+def get_progress(filename):
+    progress_key = next((k for k in download_progress.keys() if filename in k), None)
+    if progress_key:
+        return jsonify(download_progress[progress_key])
+    return jsonify({'status': 'not_found'})
+
+@app.route('/downloads/<filename>')
 def download_file(filename):
     try:
-        file_path = os.path.join(DOWNLOAD_FOLDER, filename)
-        logger.info(f"Request to download file: {file_path}")
-        
-        if not os.path.exists(file_path):
-            error_msg = f"File not found: {file_path}"
-            logger.error(error_msg)
-            return jsonify({'error': error_msg}), 404
-            
-        file_size = os.path.getsize(file_path)
-        if file_size == 0:
-            error_msg = f"Empty file: {file_path}"
-            logger.error(error_msg)
-            return jsonify({'error': error_msg}), 404
-            
-        logger.info(f"Sending file: {file_path} (size: {file_size} bytes)")
-        try:
-            response = send_file(
-                file_path,
-                as_attachment=True,
-                download_name=filename,
-                max_age=0
-            )
-            response.headers['Content-Length'] = file_size
-            return response
-        except Exception as e:
-            error_msg = f"Error sending file: {str(e)}"
-            logger.error(error_msg)
-            return jsonify({'error': error_msg}), 500
-            
+        return send_file(
+            os.path.join(DOWNLOAD_FOLDER, filename),
+            as_attachment=True,
+            download_name=filename
+        )
     except Exception as e:
-        error_msg = f"Error in download_file endpoint: {str(e)}"
-        logger.error(error_msg)
-        return jsonify({'error': error_msg}), 500
+        return jsonify({'error': str(e)}), 404
 
 if __name__ == '__main__':
     # Create download folder if it doesn't exist
