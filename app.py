@@ -7,6 +7,7 @@ import yt_dlp
 import requests
 from functools import partial
 import threading
+import random
 
 # Set up logging
 logging.basicConfig(
@@ -61,7 +62,7 @@ download_progress = {}
 download_cache = {}
 
 def get_yt_dlp_opts(quality='best'):
-    return {
+    opts = {
         'format': quality,
         'quiet': False,
         'no_warnings': False,
@@ -76,6 +77,8 @@ def get_yt_dlp_opts(quality='best'):
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
+        'cookiefile': 'cookies.txt',
+        'cookiesfrombrowser': ('chrome',),
         'extractor_args': {
             'youtube': {
                 'skip': [],
@@ -87,13 +90,27 @@ def get_yt_dlp_opts(quality='best'):
         'hls_prefer_native': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
-            'Referer': 'https://www.youtube.com/'
+            'Referer': 'https://www.youtube.com/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"'
         }
     }
+
+    # Add random sleep between requests
+    opts['sleep_interval'] = (1, 3)
+    opts['max_sleep_interval'] = 5
+
+    return opts
 
 def get_video_info(url):
     try:
@@ -101,8 +118,12 @@ def get_video_info(url):
         
         # For YouTube shorts, convert to regular video URL
         if '/shorts/' in url:
-            url = url.replace('/shorts/', '/watch?v=')
+            video_id = url.split('/shorts/')[1].split('?')[0]
+            url = f'https://www.youtube.com/watch?v={video_id}'
             logger.info(f"Converted shorts URL to: {url}")
+        
+        # Add random delay
+        time.sleep(random.uniform(1, 3))
         
         ydl_opts = get_yt_dlp_opts()
         
@@ -222,10 +243,10 @@ def download_video():
 
         # Convert quality setting to yt-dlp format string
         if quality == 'highest':
-            format_string = 'best'
+            format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         else:
             height = quality.replace('p', '')  # Convert '1080p' to '1080'
-            format_string = f'best[height<={height}]'
+            format_string = f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best'
 
         logger.info(f"Using format string: {format_string}")
 
@@ -236,8 +257,13 @@ def download_video():
                 
                 # Convert shorts URL if needed
                 if '/shorts/' in url:
-                    url = url.replace('/shorts/', '/watch?v=')
+                    video_id = url.split('/shorts/')[1].split('?')[0]
+                    url = f'https://www.youtube.com/watch?v={video_id}'
                     logger.info(f"Converted shorts URL to: {url}")
+                
+                # Add random delay between videos
+                if index > 1:
+                    time.sleep(random.uniform(1, 3))
                 
                 # First get video info to get the title
                 info_result = get_video_info(url)
@@ -253,20 +279,11 @@ def download_video():
                 output_path = os.path.join(download_dir, filename)
                 logger.info(f"Will download to: {output_path}")
 
-                # Download the video with simpler options
+                # Download the video
                 ydl_opts = {
-                    'format': format_string,
+                    **get_yt_dlp_opts(format_string),
                     'outtmpl': output_path,
-                    'quiet': False,
-                    'no_warnings': False,
-                    'verbose': True,
-                    'progress_hooks': [lambda d: handle_progress(d, filename)],
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': '*/*',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Referer': 'https://www.youtube.com/'
-                    }
+                    'progress_hooks': [lambda d: handle_progress(d, filename)]
                 }
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
