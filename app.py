@@ -145,7 +145,7 @@ def get_video_info(url):
                 
                 # Log available formats
                 if 'formats' in info:
-                    logger.info(f"Available formats: {[f'{f.get('format_id')} - {f.get('ext')} - {f.get('resolution')}' for f in info['formats']]}")
+                    logger.info(f"Available formats: {[f\"{f.get('format_id')} - {f.get('ext')} - {f.get('resolution')}\" for f in info['formats']]}")
                 else:
                     logger.warning("No formats available in video info")
                 

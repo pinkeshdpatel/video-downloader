@@ -1,0 +1,6 @@
+# Netscape HTTP Cookie File
+# This is a generated file!  Do not edit.
+
+.youtube.com	TRUE	/	TRUE	1735689600	VISITOR_INFO1_LIVE	y-NxQzTr8LQ
+.youtube.com	TRUE	/	TRUE	1735689600	GPS	1
+.youtube.com	TRUE	/	TRUE	1735689600	YSC	ZY-bXvAeXww
