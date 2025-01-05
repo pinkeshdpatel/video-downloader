@@ -61,7 +61,33 @@ cleanup_thread.start()
 download_progress = {}
 download_cache = {}
 
+# List of User-Agents for rotation
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
+    'Mozilla/5.0 (Linux; Android 10; SM-A505FN) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
+]
+
+# Load proxy list from file
+def load_proxies():
+    with open('proxyscrape_premium_http_proxies.txt', 'r') as file:
+        proxies = file.read().splitlines()
+    return proxies
+
+# Get a random proxy from the list
+def get_random_proxy():
+    proxies = load_proxies()
+    return random.choice(proxies)
+
 def get_yt_dlp_opts(quality='best'):
+    # Randomly select a User-Agent
+    selected_user_agent = random.choice(USER_AGENTS)
+    
+    # Randomly select a proxy
+    selected_proxy = get_random_proxy()
+    
     opts = {
         'format': quality,
         'quiet': False,
@@ -77,8 +103,7 @@ def get_yt_dlp_opts(quality='best'):
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
-        'cookiefile': 'cookies.txt',
-        'cookiesfrombrowser': ('chrome',),
+        'proxy': selected_proxy,  # Use the selected proxy
         'extractor_args': {
             'youtube': {
                 'skip': [],
@@ -89,7 +114,7 @@ def get_yt_dlp_opts(quality='best'):
         'file_access_retries': 10,
         'hls_prefer_native': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': selected_user_agent,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate',
@@ -264,7 +289,7 @@ def download_video():
                 
                 # Add random delay between videos
                 if index > 1:
-                    time.sleep(random.uniform(1, 3))
+                    time.sleep(random.uniform(5, 10))  # Random delay between 5-10 seconds
                 
                 # First get video info to get the title
                 info_result = get_video_info(url)
