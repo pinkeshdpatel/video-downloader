@@ -20,7 +20,7 @@ app = Flask(__name__,
     static_folder='static',
     template_folder='templates'
 )
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow all origins for /api routes
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max-limit
 
 # Constants
@@ -72,22 +72,36 @@ USER_AGENTS = [
 
 # Load proxy list from file
 def load_proxies():
-    with open('proxyscrape_premium_http_proxies.txt', 'r') as file:
-        proxies = file.read().splitlines()
-    return proxies
+    try:
+        with open('proxyscrape_premium_http_proxies.txt', 'r') as file:
+            proxies = file.read().splitlines()
+        return proxies
+    except Exception as e:
+        logger.error(f"Failed to load proxies: {e}")
+        return []
 
 # Get a random proxy from the list
 def get_random_proxy():
     proxies = load_proxies()
-    return random.choice(proxies)
+    if proxies:
+        return random.choice(proxies)
+    return None
+
+# Remove a non-working proxy from the list
+def remove_proxy(proxy):
+    proxies = load_proxies()
+    if proxy in proxies:
+        proxies.remove(proxy)
+        with open('proxyscrape_premium_http_proxies.txt', 'w') as file:
+            file.write('\n'.join(proxies))
+        logger.info(f"Removed non-working proxy: {proxy}")
 
 def get_yt_dlp_opts(quality='best'):
     # Randomly select a User-Agent
     selected_user_agent = random.choice(USER_AGENTS)
     
-    # Randomly select a proxy
+    # Try to use a proxy, but fallback to no proxy if it fails
     selected_proxy = get_random_proxy()
-    
     opts = {
         'format': quality,
         'quiet': False,
@@ -103,7 +117,6 @@ def get_yt_dlp_opts(quality='best'):
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
-        'proxy': selected_proxy,  # Use the selected proxy
         'extractor_args': {
             'youtube': {
                 'skip': [],
