@@ -271,4 +271,137 @@ def download_video():
                 if '/shorts/' in url:
                     video_id = url.split('/shorts/')[1].split('?')[0]
                     url = f'https://www.youtube.com/watch?v={video_id}'
-                    logger.info(f"
+                    logger.info(f"Converted shorts URL to: {url}")
+                
+                # Add random delay between videos
+                if index > 1:
+                    time.sleep(random.uniform(1, 5))  # Random delay between 1-5 seconds
+                
+                # First get video info to get the title
+                info_result = get_video_info(url)
+                if 'error' in info_result:
+                    raise Exception(info_result['error'])
+                
+                # Create filename from video title
+                video_title = info_result.get('title', f'video{index}')
+                safe_title = "".join(x for x in video_title if x.isalnum() or x in (' ', '-', '_'))[:50]  # Limit length
+                filename = f"video{index}_{safe_title}.mp4"
+                filename = filename.replace(' ', '_')  # Replace spaces with underscores
+                
+                output_path = os.path.join(download_dir, filename)
+                logger.info(f"Will download to: {output_path}")
+
+                # Download the video
+                ydl_opts = {
+                    **get_yt_dlp_opts(format_string),
+                    'outtmpl': output_path,
+                    'progress_hooks': [lambda d: handle_progress(d, filename)]
+                }
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    error_code = ydl.download([url])
+                    if error_code != 0:
+                        raise Exception(f"yt-dlp returned error code: {error_code}")
+                
+                if not os.path.exists(output_path):
+                    raise Exception("Download completed but file not found")
+
+                file_size = os.path.getsize(output_path)
+                logger.info(f"Download completed: {filename}, size: {file_size} bytes")
+                
+                # Generate download URL
+                download_url = url_for('static', filename=f'downloads/{filename}', _external=True)
+                logger.info(f"Download URL: {download_url}")
+
+                results.append({
+                    'url': url,
+                    'filename': filename,
+                    'status': 'completed',
+                    'message': 'Download completed successfully',
+                    'download_url': download_url,
+                    'file_size': file_size,
+                    'title': video_title
+                })
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Download error for {url}: {error_msg}")
+                results.append({
+                    'url': url,
+                    'error': error_msg,
+                    'status': 'error'
+                })
+        
+        if not any(result.get('status') == 'completed' for result in results):
+            return jsonify({'error': 'No valid videos found', 'details': results}), 400
+            
+        logger.info(f"Returning results: {results}")
+        return jsonify(results)
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Error in download endpoint: {error_msg}")
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/api/progress/<filename>')
+def get_progress(filename):
+    try:
+        progress_data = download_progress.get(filename, {
+            'status': 'unknown',
+            'progress': 0
+        })
+        return jsonify(progress_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 404
+
+@app.route('/downloads/<filename>')
+def download_file(filename):
+    try:
+        return send_file(
+            os.path.join(DOWNLOAD_FOLDER, filename),
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 404
+
+def handle_progress(d, filename):
+    if d['status'] == 'downloading':
+        try:
+            total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+            downloaded = d.get('downloaded_bytes', 0)
+            if total > 0:
+                progress = (downloaded / total) * 100
+            else:
+                progress = 0
+            
+            download_progress[filename] = {
+                'status': 'downloading',
+                'progress': progress,
+                'speed': d.get('speed', 0),
+                'eta': d.get('eta', 0)
+            }
+        except Exception as e:
+            logger.error(f"Error updating progress: {str(e)}")
+    
+    elif d['status'] == 'finished':
+        download_progress[filename] = {
+            'status': 'completed',
+            'progress': 100
+        }
+    
+    elif d['status'] == 'error':
+        download_progress[filename] = {
+            'status': 'error',
+            'error': str(d.get('error', 'Unknown error'))
+        }
+
+if __name__ == '__main__':
+    # Get port from environment variable (Render sets this)
+    port = int(os.environ.get('PORT', 5000))
+    
+    # Determine if we're in development mode
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    
+    # Run the app
+    app.run(host='0.0.0.0', port=port, debug=debug)
