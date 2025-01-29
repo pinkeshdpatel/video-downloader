@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, render_template, url_for
+from flask import Flask, request, jsonify, send_file, render_template, url_for, send_from_directory
 from flask_cors import CORS
 import os
 import time
@@ -343,14 +343,26 @@ def download_video():
                     logger.info(f"Using format: {ydl_opts['format']}")
                     ydl.download([url])
                     
-                download_url = url_for('download_file', filename=filename, _external=True)
+                # Verify file exists and is accessible
+                if not os.path.exists(output_path):
+                    raise Exception("Download completed but file not found")
+                
+                # Get file size
+                file_size = os.path.getsize(output_path)
+                if file_size == 0:
+                    raise Exception("Downloaded file is empty")
+                
+                # Generate download URL with static path
+                download_url = url_for('static', filename=f'downloads/{filename}', _external=True)
+                
                 results.append({
                     'url': url,
                     'status': 'success',
                     'download_url': download_url,
-                    'filename': filename
+                    'filename': filename,
+                    'file_size': file_size
                 })
-                logger.info(f"Download completed for {url}")
+                logger.info(f"Download completed for {url}, size: {file_size} bytes")
                 
             except Exception as e:
                 error_msg = f"Error downloading {url}: {str(e)}"
@@ -379,15 +391,12 @@ def get_progress(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 404
 
-@app.route('/downloads/<filename>')
-def download_file(filename):
+@app.route('/static/downloads/<path:filename>')
+def serve_download(filename):
     try:
-        return send_file(
-            os.path.join(DOWNLOAD_FOLDER, filename),
-            as_attachment=True,
-            download_name=filename
-        )
+        return send_from_directory(DOWNLOAD_FOLDER, filename, as_attachment=True)
     except Exception as e:
+        logger.error(f"Error serving file {filename}: {e}")
         return jsonify({'error': str(e)}), 404
 
 def handle_progress(d, filename):

@@ -383,10 +383,16 @@
                             if (result.error.includes('Requested format is not available')) {
                                 showMessage(`The requested quality is not available. Trying best available quality...`, 'error');
                             } else {
-                                showMessage(result.error);
+                                // Create and click download link
+                                const link = document.createElement('a');
+                                link.href = result.download_url;
+                                link.download = result.filename;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                
+                                showMessage(`Successfully downloaded: ${result.filename} (${formatFileSize(result.file_size)})`, 'success');
                             }
-                        } else {
-                            showMessage(`Successfully downloaded: ${result.filename}`, 'success');
                         }
                     });
                 }
@@ -399,6 +405,15 @@
             }
         }
 
+        // Format file size
+        function formatFileSize(bytes) {
+            if (!bytes) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+        }
+
         // Main download function
         async function startDownload(urls, skipPreview = false) {
             console.log('Starting download process for URLs:', urls);
@@ -406,6 +421,14 @@
             if (!urls || urls.length === 0) {
                 showMessage('Please enter at least one URL');
                 return;
+            }
+
+            // Validate cookies
+            const cookies = document.getElementById('cookies').value.trim();
+            if (!cookies) {
+                showMessage('Warning: No cookies provided. Downloads may fail. Please provide YouTube cookies.', 'error');
+            } else if (!cookies.includes('youtube.com')) {
+                showMessage('Warning: The provided cookies don\'t appear to be from YouTube. Please make sure to export cookies while on youtube.com', 'error');
             }
 
             try {
@@ -428,7 +451,9 @@
                         const result = await downloadVideos(videoUrls, qualitySelect.value);
                         if (result && result.results) {
                             const successCount = result.results.filter(r => r.status === 'success').length;
-                            showMessage(`Successfully downloaded ${successCount} out of ${videoUrls.length} videos`, 'success');
+                            if (successCount > 0) {
+                                showMessage(`Successfully downloaded ${successCount} out of ${videoUrls.length} videos`, 'success');
+                            }
                         }
                     } catch (error) {
                         console.error('Download error:', error);
