@@ -8,6 +8,7 @@ import requests
 from functools import partial
 import threading
 import random
+import tempfile
 
 # Set up logging
 logging.basicConfig(
@@ -25,15 +26,18 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max-limit
 
 # Constants
 DOWNLOAD_FOLDER = os.getenv('DOWNLOAD_FOLDER', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'downloads'))
+TEMP_FOLDER = os.getenv('TEMP_FOLDER', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp'))
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+os.makedirs(TEMP_FOLDER, exist_ok=True)
 
-# Clean up old downloads periodically
-def cleanup_downloads():
+# Clean up old downloads and temp files periodically
+def cleanup_files():
     try:
         # Delete files older than 1 hour
         max_age = 3600  # 1 hour in seconds
         current_time = time.time()
         
+        # Clean downloads
         for filename in os.listdir(DOWNLOAD_FOLDER):
             file_path = os.path.join(DOWNLOAD_FOLDER, filename)
             if os.path.isfile(file_path):
@@ -44,18 +48,43 @@ def cleanup_downloads():
                         logger.info(f"Cleaned up old file: {filename}")
                     except Exception as e:
                         logger.error(f"Error cleaning up {filename}: {e}")
+        
+        # Clean temp files
+        for filename in os.listdir(TEMP_FOLDER):
+            if filename.startswith('user_cookies_'):
+                file_path = os.path.join(TEMP_FOLDER, filename)
+                file_age = current_time - os.path.getmtime(file_path)
+                if file_age > max_age:
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"Cleaned up temp file: {filename}")
+                    except Exception as e:
+                        logger.error(f"Error cleaning up temp file {filename}: {e}")
+                        
     except Exception as e:
         logger.error(f"Error in cleanup: {e}")
 
 # Run cleanup every hour
 def schedule_cleanup():
     while True:
-        cleanup_downloads()
+        cleanup_files()
         time.sleep(3600)  # Sleep for 1 hour
 
 # Start cleanup thread
 cleanup_thread = threading.Thread(target=schedule_cleanup, daemon=True)
 cleanup_thread.start()
+
+def save_user_cookies(cookies_str: str) -> str:
+    """Save user cookies to a temporary file and return the file path"""
+    try:
+        # Create a temporary file with random name
+        cookie_file = os.path.join(TEMP_FOLDER, f'user_cookies_{random.randint(1000, 9999)}.txt')
+        with open(cookie_file, 'w') as f:
+            f.write(cookies_str)
+        return cookie_file
+    except Exception as e:
+        logger.error(f"Error saving cookies: {e}")
+        return None
 
 # Global dictionaries for tracking downloads
 download_progress = {}
@@ -70,7 +99,7 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
 ]
 
-def get_yt_dlp_opts(quality='best'):
+def get_yt_dlp_opts(quality='best', cookies_str=None):
     # Randomly select a User-Agent
     selected_user_agent = random.choice(USER_AGENTS)
     
@@ -89,7 +118,6 @@ def get_yt_dlp_opts(quality='best'):
         'no_color': True,
         'geo_bypass': True,
         'geo_bypass_country': 'US',
-        'cookiefile': 'cookies.txt',  # Use cookies for authentication
         'extractor_args': {
             'youtube': {
                 'skip': [],
@@ -118,8 +146,14 @@ def get_yt_dlp_opts(quality='best'):
     }
 
     # Add random sleep between requests
-    opts['sleep_interval'] = (1, 3)
+    opts['sleep_interval'] = random.randint(1, 3)
     opts['max_sleep_interval'] = 5
+
+    # Add cookies if provided
+    if cookies_str:
+        cookie_file = save_user_cookies(cookies_str)
+        if cookie_file:
+            opts['cookiefile'] = cookie_file
 
     return opts
 
@@ -195,6 +229,7 @@ def get_videos_info():
     try:
         data = request.get_json()
         urls = data.get('urls', [])
+        cookies = data.get('cookies', '')  # Get cookies from request
         videos_info = []
         errors = []
 
@@ -202,7 +237,7 @@ def get_videos_info():
 
         for url in urls:
             try:
-                ydl_opts = get_yt_dlp_opts()
+                ydl_opts = get_yt_dlp_opts(cookies_str=cookies)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     logger.info(f"Extracting info for URL: {url}")
                     info = ydl.extract_info(url, download=False)
@@ -243,101 +278,52 @@ def download_video():
         
         urls = data.get('urls', [])
         quality = data.get('quality', 'highest')
+        cookies = data.get('cookies', '')  # Get cookies from request
         
         if not urls:
             logger.error("No URLs provided")
             return jsonify({'error': 'No URLs provided'}), 400
 
-        # Create downloads directory in the static folder
-        download_dir = os.path.join(app.static_folder, 'downloads')
-        os.makedirs(download_dir, exist_ok=True)
-        logger.info(f"Using download directory: {download_dir}")
-
-        # Convert quality setting to yt-dlp format string
-        if quality == 'highest':
-            format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-        else:
-            height = quality.replace('p', '')  # Convert '1080p' to '1080'
-            format_string = f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best'
-
-        logger.info(f"Using format string: {format_string}")
-
+        # Process each URL
         results = []
-        for index, url in enumerate(urls, 1):
+        for url in urls:
             try:
-                logger.info(f"Processing URL {index}: {url}")
+                # Generate unique filename
+                filename = f"video_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
+                output_path = os.path.join(DOWNLOAD_FOLDER, filename)
                 
-                # Convert shorts URL if needed
-                if '/shorts/' in url:
-                    video_id = url.split('/shorts/')[1].split('?')[0]
-                    url = f'https://www.youtube.com/watch?v={video_id}'
-                    logger.info(f"Converted shorts URL to: {url}")
-                
-                # Add random delay between videos
-                if index > 1:
-                    time.sleep(random.uniform(1, 5))  # Random delay between 1-5 seconds
-                
-                # First get video info to get the title
-                info_result = get_video_info(url)
-                if 'error' in info_result:
-                    raise Exception(info_result['error'])
-                
-                # Create filename from video title
-                video_title = info_result.get('title', f'video{index}')
-                safe_title = "".join(x for x in video_title if x.isalnum() or x in (' ', '-', '_'))[:50]  # Limit length
-                filename = f"video{index}_{safe_title}.mp4"
-                filename = filename.replace(' ', '_')  # Replace spaces with underscores
-                
-                output_path = os.path.join(download_dir, filename)
-                logger.info(f"Will download to: {output_path}")
-
-                # Download the video
-                ydl_opts = {
-                    **get_yt_dlp_opts(format_string),
+                # Configure yt-dlp options
+                ydl_opts = get_yt_dlp_opts(quality, cookies)
+                ydl_opts.update({
                     'outtmpl': output_path,
-                    'progress_hooks': [lambda d: handle_progress(d, filename)]
-                }
-
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    error_code = ydl.download([url])
-                    if error_code != 0:
-                        raise Exception(f"yt-dlp returned error code: {error_code}")
-                
-                if not os.path.exists(output_path):
-                    raise Exception("Download completed but file not found")
-
-                file_size = os.path.getsize(output_path)
-                logger.info(f"Download completed: {filename}, size: {file_size} bytes")
-                
-                # Generate download URL
-                download_url = url_for('static', filename=f'downloads/{filename}', _external=True)
-                logger.info(f"Download URL: {download_url}")
-
-                results.append({
-                    'url': url,
-                    'filename': filename,
-                    'status': 'completed',
-                    'message': 'Download completed successfully',
-                    'download_url': download_url,
-                    'file_size': file_size,
-                    'title': video_title
+                    'progress_hooks': [partial(handle_progress, filename=filename)]
                 })
-
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Download error for {url}: {error_msg}")
+                
+                # Start download
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    logger.info(f"Starting download for URL: {url}")
+                    ydl.download([url])
+                    
+                download_url = url_for('download_file', filename=filename, _external=True)
                 results.append({
                     'url': url,
-                    'error': error_msg,
-                    'status': 'error'
+                    'status': 'success',
+                    'download_url': download_url,
+                    'filename': filename
+                })
+                logger.info(f"Download completed for {url}")
+                
+            except Exception as e:
+                error_msg = f"Error downloading {url}: {str(e)}"
+                logger.error(error_msg)
+                results.append({
+                    'url': url,
+                    'status': 'error',
+                    'error': error_msg
                 })
         
-        if not any(result.get('status') == 'completed' for result in results):
-            return jsonify({'error': 'No valid videos found', 'details': results}), 400
-            
-        logger.info(f"Returning results: {results}")
-        return jsonify(results)
-
+        return jsonify({'results': results})
+        
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error in download endpoint: {error_msg}")

@@ -125,6 +125,21 @@
                 ></textarea>
             </div>
 
+            <div class="mb-6">
+                <label for="cookies" class="block text-sm font-medium text-gray-700 mb-2">
+                    YouTube Cookies (Optional)
+                    <span class="text-gray-500 text-xs">(paste cookies.txt content to avoid bot detection)</span>
+                </label>
+                <textarea 
+                    id="cookies" 
+                    class="textarea-custom h-24"
+                    placeholder="Paste your YouTube cookies here to improve download success rate..."
+                ></textarea>
+                <p class="mt-2 text-sm text-gray-500">
+                    Tip: Use browser extensions like 'Get cookies.txt' to export your YouTube cookies
+                </p>
+            </div>
+
             <div class="flex flex-wrap items-center gap-4">
                 <button id="checkUrls" class="btn btn-primary">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -234,12 +249,16 @@
 
             console.log('Checking URLs:', urls);
             try {
+                const cookies = document.getElementById('cookies').value.trim();
                 const response = await fetch('/api/video-info', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ urls })
+                    body: JSON.stringify({ 
+                        urls,
+                        cookies 
+                    })
                 });
 
                 if (!response.ok) {
@@ -248,28 +267,10 @@
 
                 const data = await response.json();
                 console.log('Raw API Response:', data);
-
-                if (data.error) {
-                    showMessage(data.error);
-                    return null;
-                }
-
-                // Show any errors from the backend
-                if (data.errors && data.errors.length > 0) {
-                    data.errors.forEach(error => showMessage(error));
-                }
-
-                // Ensure videos is an array
-                if (!data.videos || !Array.isArray(data.videos)) {
-                    console.error('Invalid videos data:', data);
-                    showMessage('Invalid response from server');
-                    return null;
-                }
-
-                return data.videos;
+                return data;
             } catch (error) {
-                console.error('Error:', error);
-                showMessage(`Error: ${error.message}`);
+                console.error('Error checking URLs:', error);
+                showMessage(`Error checking URLs: ${error.message}`);
                 return null;
             }
         }
@@ -304,6 +305,52 @@
             });
         }
 
+        // Download videos function
+        async function downloadVideos(urls, quality = 'highest') {
+            try {
+                const cookies = document.getElementById('cookies').value.trim();
+                const response = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        urls,
+                        quality,
+                        cookies
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    showMessage(data.error);
+                    return null;
+                }
+
+                // Show any errors from individual downloads
+                if (data.results) {
+                    data.results.forEach(result => {
+                        if (result.status === 'error') {
+                            showMessage(result.error);
+                        } else {
+                            showMessage(`Successfully downloaded: ${result.filename}`, 'success');
+                        }
+                    });
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Error downloading videos:', error);
+                showMessage(`Error downloading videos: ${error.message}`);
+                return null;
+            }
+        }
+
         // Main download function
         async function startDownload(urls, skipPreview = false) {
             console.log('Starting download process for URLs:', urls);
@@ -330,46 +377,10 @@
                         const videoUrls = videos.map(v => v.url);
                         console.log('Sending URLs for download:', videoUrls);
                         
-                        const response = await fetch('/api/download', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                urls: videoUrls,
-                                quality: qualitySelect.value
-                            })
-                        });
-
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-
-                        const downloadData = await response.json();
-                        console.log('Download response:', downloadData);
-
-                        if (downloadData.error) {
-                            showMessage(`Download error: ${downloadData.error}`, 'error');
-                        } else if (Array.isArray(downloadData)) {
-                            downloadData.forEach((result, index) => {
-                                if (result.error) {
-                                    showMessage(`Failed to download video ${index + 1}: ${result.error}`, 'error');
-                                } else {
-                                    // Create download link
-                                    const link = document.createElement('a');
-                                    link.href = result.download_url;
-                                    link.download = result.filename;
-                                    link.style.display = 'none';
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
-                                    
-                                    const title = result.title || `Video ${index + 1}`;
-                                    showMessage(`Downloading: ${title}`, 'success');
-                                }
-                            });
-                        } else {
-                            showMessage('Invalid response from server', 'error');
+                        const result = await downloadVideos(videoUrls, qualitySelect.value);
+                        if (result && result.results) {
+                            const successCount = result.results.filter(r => r.status === 'success').length;
+                            showMessage(`Successfully downloaded ${successCount} out of ${videoUrls.length} videos`, 'success');
                         }
                     } catch (error) {
                         console.error('Download error:', error);
