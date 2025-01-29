@@ -1,9 +1,11 @@
 import os
 import sys
 from tqdm import tqdm
-import pytube
+import yt_dlp
 import instaloader
 from urllib.parse import urlparse, parse_qs
+from browser_emulator import BrowserEmulator
+from proxy_manager import ProxyManager
 
 def create_download_folder():
     download_dir = os.path.join(os.getcwd(), 'downloads')
@@ -11,65 +13,97 @@ def create_download_folder():
         os.makedirs(download_dir)
     return download_dir
 
-def on_progress(stream, chunk, bytes_remaining):
-    total_size = stream.filesize
-    bytes_downloaded = total_size - bytes_remaining
-    percentage = (bytes_downloaded / total_size) * 100
-    sys.stdout.write(f'\rDownloading... {percentage:.1f}%')
-    sys.stdout.flush()
+class DownloadLogger:
+    def debug(self, msg):
+        if msg.startswith('[download]'):
+            print(msg)
+    
+    def warning(self, msg):
+        pass
+    
+    def error(self, msg):
+        print(f"Error: {msg}")
 
-def convert_youtube_url(url):
-    """Convert YouTube Shorts URL to standard YouTube URL"""
-    if 'youtube.com/shorts/' in url:
-        video_id = url.split('/shorts/')[1].split('?')[0]
-        return f'https://youtube.com/watch?v={video_id}'
-    return url
-
-def download_youtube_video(link, index, download_dir):
+def download_youtube_video(link, index, download_dir, user_cookies=None):
+    browser = None
     try:
-        # Convert shorts URL to standard URL if needed
-        link = convert_youtube_url(link)
-        yt = pytube.YouTube(link, on_progress_callback=on_progress)
-        print(f'\nTitle: {yt.title}')
+        # Initialize browser emulator and proxy manager
+        browser = BrowserEmulator(user_cookies)
+        proxy_manager = ProxyManager()
         
-        # Get available streams
-        streams = yt.streams.filter(progressive=True, file_extension='mp4')
-        print("\nAvailable qualities:")
-        for i, stream in enumerate(streams, 1):
-            print(f"{i}. {stream.resolution}")
+        # Get yt-dlp options with browser emulation
+        ydl_opts = browser.get_yt_dlp_options()
         
-        choice = input("\nSelect quality (enter number): ")
-        try:
-            stream = streams[int(choice)-1]
-        except:
-            stream = streams.get_highest_resolution()
-            print("Invalid choice, using highest quality")
+        # Add download specific options
+        ydl_opts.update({
+            'outtmpl': os.path.join(download_dir, f'{index}.%(ext)s'),
+            'format': 'best[ext=mp4]',
+            'logger': DownloadLogger(),
+            'progress_hooks': [lambda d: print(f'\rDownloading... {d["_percent_str"]}', end='') 
+                             if d['status'] == 'downloading' else None],
+        })
         
-        output_path = os.path.join(download_dir, f'{index}.mp4')
-        stream.download(filename=output_path)
-        print(f'\nDownloaded YouTube video: {index}.mp4')
-        return True
+        # Try with different proxies until success
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                proxy = proxy_manager.get_proxy()
+                if proxy:
+                    ydl_opts['proxy'] = proxy['http']
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(link, download=True)
+                    print(f'\nDownloaded YouTube video: {index}.mp4')
+                    return True
+                    
+            except Exception as e:
+                if proxy:
+                    proxy_manager.remove_proxy(proxy)
+                if attempt == max_retries - 1:
+                    raise e
+                print(f'\nRetrying with different proxy... (Attempt {attempt + 2}/{max_retries})')
+                continue
+                
     except Exception as e:
         print(f'\nError downloading YouTube video: {e}')
         return False
+    finally:
+        if browser:
+            browser.cleanup()
 
-def download_youtube_playlist(playlist_url, start_index, download_dir):
+def download_youtube_playlist(playlist_url, start_index, download_dir, user_cookies=None):
+    browser = None
     try:
-        playlist = pytube.Playlist(playlist_url)
-        print(f'\nPlaylist: {playlist.title}')
-        print(f'Total videos: {len(playlist.video_urls)}')
+        # Initialize browser emulator and proxy manager
+        browser = BrowserEmulator(user_cookies)
+        proxy_manager = ProxyManager()
         
-        success_count = 0
-        for i, video_url in enumerate(playlist.video_urls, start=start_index):
-            print(f'\nDownloading video {i}...')
-            if download_youtube_video(video_url, i, download_dir):
-                success_count += 1
+        # Get yt-dlp options
+        ydl_opts = browser.get_yt_dlp_options()
+        ydl_opts.update({
+            'outtmpl': os.path.join(download_dir, f'%(playlist_index)d.%(ext)s'),
+            'format': 'best[ext=mp4]',
+            'logger': DownloadLogger(),
+            'playliststart': start_index,
+        })
         
-        print(f'\nSuccessfully downloaded {success_count} videos from playlist')
-        return start_index + len(playlist.video_urls)
+        proxy = proxy_manager.get_proxy()
+        if proxy:
+            ydl_opts['proxy'] = proxy['http']
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(playlist_url, download=True)
+            videos = info['entries']
+            success_count = len([v for v in videos if v is not None])
+            print(f'\nSuccessfully downloaded {success_count} videos from playlist')
+            return start_index + len(videos)
+            
     except Exception as e:
         print(f'\nError processing playlist: {e}')
         return start_index
+    finally:
+        if browser:
+            browser.cleanup()
 
 def download_instagram_video(link, index, download_dir):
     try:
@@ -117,6 +151,10 @@ def main():
     print("- YouTube playlists: https://youtube.com/playlist?list=...")
     print("- Instagram posts: https://instagram.com/p/...")
     
+    print("\nOptional: Paste your YouTube cookies to improve download success rate")
+    print("(You can get cookies using browser extensions like 'Get cookies.txt')")
+    user_cookies = input("Enter cookies (or press Enter to skip): ").strip()
+    
     links = input('\nEnter links: ').split(',')
     index = 1
     
@@ -128,9 +166,9 @@ def main():
             
         if 'youtube.com' in link or 'youtu.be' in link:
             if 'playlist' in link:
-                index = download_youtube_playlist(link, index, download_dir)
+                index = download_youtube_playlist(link, index, download_dir, user_cookies)
             else:
-                if download_youtube_video(link, index, download_dir):
+                if download_youtube_video(link, index, download_dir, user_cookies):
                     index += 1
         elif 'instagram.com' in link:
             if download_instagram_video(link, index, download_dir):
