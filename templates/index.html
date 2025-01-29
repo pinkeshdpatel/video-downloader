@@ -380,18 +380,27 @@
                 if (data.results) {
                     data.results.forEach(result => {
                         if (result.status === 'error') {
-                            if (result.error.includes('Requested format is not available')) {
-                                showMessage(`The requested quality is not available. Trying best available quality...`, 'error');
-                            } else {
-                                // Create and click download link
-                                const link = document.createElement('a');
-                                link.href = result.download_url;
-                                link.download = result.filename;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                
-                                showMessage(`Successfully downloaded: ${result.filename} (${formatFileSize(result.file_size)})`, 'success');
+                            showMessage(result.error, 'error');
+                        } else if (result.status === 'success') {
+                            // Create and trigger download
+                            const link = document.createElement('a');
+                            link.href = result.download_url;
+                            link.download = result.filename;
+                            link.style.display = 'none';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            showMessage(`Starting download: ${result.filename} (${formatFileSize(result.file_size)})`, 'success');
+                            
+                            // Update the video card progress if it exists
+                            const videoCard = document.querySelector(`.video-card[data-url="${result.url}"]`);
+                            if (videoCard) {
+                                const progressBar = videoCard.querySelector('.download-progress');
+                                if (progressBar) {
+                                    progressBar.classList.remove('hidden');
+                                    progressBar.querySelector('.download-progress-bar').style.width = '100%';
+                                }
                             }
                         }
                     });

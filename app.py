@@ -145,7 +145,7 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'youtube': {
                 'skip': [],
                 'player_skip': [],
-                'player_client': ['android'],
+                'player_client': ['android', 'web'],
                 'max_comments': [0],
             }
         },
@@ -154,19 +154,18 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         'hls_prefer_native': True,
         'http_headers': {
             'User-Agent': selected_user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
             'Referer': 'https://www.youtube.com/',
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Site': 'none',
             'Sec-Fetch-User': '?1',
             'Upgrade-Insecure-Requests': '1',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
+            'DNT': '1',
+            'Sec-GPC': '1'
         },
         'youtube_include_dash_manifest': False,
         'youtube_include_hls_manifest': False,
@@ -175,12 +174,12 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         'check_formats': False,
         'postprocessors': [{
             'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',  # Force MP4 output
+            'preferedformat': 'mp4',
         }],
     }
 
     # Add random sleep between requests
-    opts['sleep_interval'] = random.randint(1, 3)
+    opts['sleep_interval'] = random.randint(2, 4)
     opts['max_sleep_interval'] = 5
 
     # Add cookies if provided
@@ -189,7 +188,15 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         if cookie_file:
             opts['cookiefile'] = cookie_file
             opts['cookiesfrombrowser'] = None
-
+            # Add additional YouTube-specific cookie handling
+            if 'youtube.com' in cookies_str:
+                opts['extractor_args']['youtube'].update({
+                    'skip_webpage': [False],
+                    'skip_initial_data': [False],
+                    'embed_thumbnail': [True],
+                    'player_skip': [],
+                })
+    
     return opts
 
 def get_video_info(url, cookies_str=None):
@@ -203,8 +210,11 @@ def get_video_info(url, cookies_str=None):
             logger.info(f"Converted shorts URL to: {url}")
         
         # Add random delay
-        time.sleep(random.uniform(1, 3))  # Random delay between 1-3 seconds
+        time.sleep(random.uniform(2, 4))  # Random delay between 2-4 seconds
         
+        if not cookies_str:
+            logger.warning("No cookies provided. This may result in bot detection.")
+            
         ydl_opts = get_yt_dlp_opts(cookies_str=cookies_str)
         ydl_opts.update({
             'extract_flat': True,  # Only extract metadata
@@ -256,7 +266,10 @@ def get_video_info(url, cookies_str=None):
                     raise Exception("This video is age-restricted. Please provide cookies from a logged-in account.")
                 elif "Sign in to confirm you're not a bot" in error_msg:
                     logger.error("Bot detection triggered")
-                    raise Exception("YouTube thinks we're a bot. Please provide cookies from a logged-in account.")
+                    if not cookies_str:
+                        raise Exception("YouTube thinks we're a bot. Please provide cookies from a logged-in account to bypass this.")
+                    else:
+                        raise Exception("Bot detection triggered even with cookies. Please try with fresh cookies from a recently logged-in account.")
                 else:
                     logger.error(f"Download error: {error_msg}")
                     raise
@@ -394,7 +407,33 @@ def get_progress(filename):
 @app.route('/static/downloads/<path:filename>')
 def serve_download(filename):
     try:
-        return send_from_directory(DOWNLOAD_FOLDER, filename, as_attachment=True)
+        # Ensure the file exists
+        file_path = os.path.join(DOWNLOAD_FOLDER, filename)
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            return jsonify({'error': 'File not found'}), 404
+            
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            logger.error(f"File is empty: {file_path}")
+            return jsonify({'error': 'File is empty'}), 404
+            
+        # Set content disposition to force download
+        response = send_from_directory(
+            DOWNLOAD_FOLDER, 
+            filename, 
+            as_attachment=True,
+            attachment_filename=filename
+        )
+        response.headers['Content-Length'] = file_size
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        logger.info(f"Serving file for download: {filename}, size: {file_size} bytes")
+        return response
+        
     except Exception as e:
         logger.error(f"Error serving file {filename}: {e}")
         return jsonify({'error': str(e)}), 404
