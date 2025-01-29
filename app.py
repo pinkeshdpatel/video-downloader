@@ -127,14 +127,15 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
     
     opts = {
         'format': format_string,
-        'merge_output_format': 'mp4',  # Force MP4 output
+        'merge_output_format': 'mp4',
         'quiet': False,
         'no_warnings': False,
         'verbose': True,
         'extract_flat': False,
         'socket_timeout': 30,
-        'retries': 10,
-        'fragment_retries': 10,
+        'retries': 15,  # Increased retries
+        'fragment_retries': 15,  # Increased fragment retries
+        'retry_sleep_functions': {'http': lambda n: 5 * (2 ** (n-1))},  # Exponential backoff
         'force_generic_extractor': False,
         'nocheckcertificate': True,
         'ignoreerrors': False,
@@ -145,30 +146,34 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'youtube': {
                 'skip': [],
                 'player_skip': [],
-                'player_client': ['android', 'web'],
+                'player_client': ['android', 'web', 'tv_embedded'],
                 'max_comments': [0],
+                'player_params': ['all'],
+                'embed_thumbnail': [True],
+                'innertube_key': ['AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'],
             }
         },
-        'extractor_retries': 10,
-        'file_access_retries': 10,
+        'extractor_retries': 15,  # Increased extractor retries
+        'file_access_retries': 15,  # Increased file access retries
         'hls_prefer_native': True,
         'http_headers': {
             'User-Agent': selected_user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept': '*/*',  # Changed to accept all
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
             'Referer': 'https://www.youtube.com/',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'DNT': '1',
-            'Sec-GPC': '1'
+            'Origin': 'https://www.youtube.com',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache',
         },
-        'youtube_include_dash_manifest': False,
-        'youtube_include_hls_manifest': False,
+        'youtube_include_dash_manifest': True,  # Changed to True
+        'youtube_include_hls_manifest': True,   # Changed to True
         'prefer_insecure': True,
         'allow_unplayable_formats': True,
         'check_formats': False,
@@ -178,9 +183,9 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         }],
     }
 
-    # Add random sleep between requests
-    opts['sleep_interval'] = random.randint(2, 4)
-    opts['max_sleep_interval'] = 5
+    # Add random sleep between requests with longer delays
+    opts['sleep_interval'] = random.randint(3, 6)  # Increased delay
+    opts['max_sleep_interval'] = 8
 
     # Add cookies if provided
     if cookies_str:
@@ -320,6 +325,22 @@ def get_videos_info():
         logger.error(f"Error in video info endpoint: {error_msg}")
         return jsonify({'error': error_msg}), 500
 
+def handle_download_error(error_msg, cookies_str=None):
+    """Handle different types of download errors and return appropriate messages"""
+    if "HTTP Error 403" in error_msg:
+        if not cookies_str:
+            return "Access forbidden by YouTube. Please provide cookies from a logged-in account."
+        else:
+            return "Access forbidden even with cookies. Please try with fresh cookies from a different account or wait a few minutes."
+    elif "Sign in to confirm you're not a bot" in error_msg:
+        return "YouTube bot detection triggered. Please provide fresh cookies from a logged-in account."
+    elif "Sign in to confirm your age" in error_msg:
+        return "This video is age-restricted. Please provide cookies from a logged-in account."
+    elif "This video is not available" in error_msg:
+        return "This video is not available. It might be private or deleted."
+    else:
+        return f"Download error: {error_msg}"
+
 @app.route('/api/download', methods=['POST'])
 def download_video():
     try:
@@ -347,15 +368,29 @@ def download_video():
                 ydl_opts.update({
                     'outtmpl': output_path,
                     'progress_hooks': [partial(handle_progress, filename=filename)],
-                    'merge_output_format': 'mp4',  # Ensure MP4 output
                 })
                 
-                # Start download
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    logger.info(f"Starting download for URL: {url}")
-                    logger.info(f"Using format: {ydl_opts['format']}")
-                    ydl.download([url])
-                    
+                # Start download with retry mechanism
+                max_retries = 3
+                retry_count = 0
+                last_error = None
+                
+                while retry_count < max_retries:
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            logger.info(f"Starting download for URL: {url} (Attempt {retry_count + 1}/{max_retries})")
+                            logger.info(f"Using format: {ydl_opts['format']}")
+                            ydl.download([url])
+                            break  # If successful, break the retry loop
+                    except Exception as e:
+                        last_error = str(e)
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            logger.warning(f"Attempt {retry_count} failed, retrying in {5 * retry_count} seconds...")
+                            time.sleep(5 * retry_count)  # Exponential backoff
+                        else:
+                            raise Exception(handle_download_error(last_error, cookies))
+                
                 # Verify file exists and is accessible
                 if not os.path.exists(output_path):
                     raise Exception("Download completed but file not found")
@@ -365,7 +400,7 @@ def download_video():
                 if file_size == 0:
                     raise Exception("Downloaded file is empty")
                 
-                # Generate download URL with static path
+                # Generate download URL
                 download_url = url_for('static', filename=f'downloads/{filename}', _external=True)
                 
                 results.append({
@@ -378,8 +413,8 @@ def download_video():
                 logger.info(f"Download completed for {url}, size: {file_size} bytes")
                 
             except Exception as e:
-                error_msg = f"Error downloading {url}: {str(e)}"
-                logger.error(error_msg)
+                error_msg = handle_download_error(str(e), cookies)
+                logger.error(f"Error downloading {url}: {error_msg}")
                 results.append({
                     'url': url,
                     'status': 'error',
@@ -389,7 +424,7 @@ def download_video():
         return jsonify({'results': results})
         
     except Exception as e:
-        error_msg = str(e)
+        error_msg = handle_download_error(str(e), cookies)
         logger.error(f"Error in download endpoint: {error_msg}")
         return jsonify({'error': error_msg}), 500
 
