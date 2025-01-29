@@ -161,11 +161,11 @@
                     Quick Download All
                 </button>
                 <select id="quality" class="select-custom">
-                    <option value="highest">Highest Quality</option>
-                    <option value="1080p">1080p</option>
-                    <option value="720p">720p</option>
-                    <option value="480p">480p</option>
-                    <option value="360p">360p</option>
+                    <option value="highest">Highest Quality (Best Available)</option>
+                    <option value="1080p">1080p (or Best Available Below)</option>
+                    <option value="720p">720p (or Best Available Below)</option>
+                    <option value="480p">480p (or Best Available Below)</option>
+                    <option value="360p">360p (or Best Available Below)</option>
                 </select>
             </div>
         </div>
@@ -349,6 +349,10 @@
         async function downloadVideos(urls, quality = 'highest') {
             try {
                 const cookies = document.getElementById('cookies').value.trim();
+                
+                // Show quality info message
+                showMessage(`Attempting to download in ${quality} quality. If not available, will use best available quality below the selected resolution.`, 'success');
+                
                 const response = await fetch('/api/download', {
                     method: 'POST',
                     headers: {
@@ -376,7 +380,11 @@
                 if (data.results) {
                     data.results.forEach(result => {
                         if (result.status === 'error') {
-                            showMessage(result.error);
+                            if (result.error.includes('Requested format is not available')) {
+                                showMessage(`The requested quality is not available. Trying best available quality...`, 'error');
+                            } else {
+                                showMessage(result.error);
+                            }
                         } else {
                             showMessage(`Successfully downloaded: ${result.filename}`, 'success');
                         }

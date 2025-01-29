@@ -111,8 +111,23 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
     # Randomly select a User-Agent
     selected_user_agent = random.choice(USER_AGENTS)
     
+    # Convert quality setting to yt-dlp format string
+    if quality == 'highest':
+        format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+    elif quality == '1080p':
+        format_string = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best'
+    elif quality == '720p':
+        format_string = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best'
+    elif quality == '480p':
+        format_string = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best'
+    elif quality == '360p':
+        format_string = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
+    else:
+        format_string = 'best[ext=mp4]/best'
+    
     opts = {
-        'format': quality,
+        'format': format_string,
+        'merge_output_format': 'mp4',  # Force MP4 output
         'quiet': False,
         'no_warnings': False,
         'verbose': True,
@@ -130,8 +145,8 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'youtube': {
                 'skip': [],
                 'player_skip': [],
-                'player_client': ['android'],  # Use android client to avoid some restrictions
-                'max_comments': [0],  # Don't fetch comments
+                'player_client': ['android'],
+                'max_comments': [0],
             }
         },
         'extractor_retries': 10,
@@ -153,11 +168,15 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"Windows"'
         },
-        'youtube_include_dash_manifest': False,  # Skip DASH manifest
-        'youtube_include_hls_manifest': False,   # Skip HLS manifest
-        'prefer_insecure': True,                 # Allow fallback to insecure connections
-        'allow_unplayable_formats': True,        # Allow all formats
-        'check_formats': False,                  # Don't check formats before downloading
+        'youtube_include_dash_manifest': False,
+        'youtube_include_hls_manifest': False,
+        'prefer_insecure': True,
+        'allow_unplayable_formats': True,
+        'check_formats': False,
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',  # Force MP4 output
+        }],
     }
 
     # Add random sleep between requests
@@ -169,7 +188,7 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         cookie_file = save_user_cookies(cookies_str)
         if cookie_file:
             opts['cookiefile'] = cookie_file
-            opts['cookiesfrombrowser'] = None  # Don't try to load cookies from browser when we have cookie file
+            opts['cookiesfrombrowser'] = None
 
     return opts
 
@@ -296,7 +315,7 @@ def download_video():
         
         urls = data.get('urls', [])
         quality = data.get('quality', 'highest')
-        cookies = data.get('cookies', '')  # Get cookies from request
+        cookies = data.get('cookies', '')
         
         if not urls:
             logger.error("No URLs provided")
@@ -314,12 +333,14 @@ def download_video():
                 ydl_opts = get_yt_dlp_opts(quality, cookies)
                 ydl_opts.update({
                     'outtmpl': output_path,
-                    'progress_hooks': [partial(handle_progress, filename=filename)]
+                    'progress_hooks': [partial(handle_progress, filename=filename)],
+                    'merge_output_format': 'mp4',  # Ensure MP4 output
                 })
                 
                 # Start download
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     logger.info(f"Starting download for URL: {url}")
+                    logger.info(f"Using format: {ydl_opts['format']}")
                     ydl.download([url])
                     
                 download_url = url_for('download_file', filename=filename, _external=True)
