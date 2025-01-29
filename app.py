@@ -79,8 +79,16 @@ def save_user_cookies(cookies_str: str) -> str:
     try:
         # Create a temporary file with random name
         cookie_file = os.path.join(TEMP_FOLDER, f'user_cookies_{random.randint(1000, 9999)}.txt')
+        
+        # Clean up the cookie string
+        cookies_str = cookies_str.strip()
+        if not cookies_str.startswith('# Netscape HTTP Cookie File'):
+            cookies_str = '# Netscape HTTP Cookie File\n' + cookies_str
+        
         with open(cookie_file, 'w') as f:
             f.write(cookies_str)
+            
+        logger.info(f"Saved cookies to file: {cookie_file}")
         return cookie_file
     except Exception as e:
         logger.error(f"Error saving cookies: {e}")
@@ -121,7 +129,9 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         'extractor_args': {
             'youtube': {
                 'skip': [],
-                'player_skip': []
+                'player_skip': [],
+                'player_client': ['android'],  # Use android client to avoid some restrictions
+                'max_comments': [0],  # Don't fetch comments
             }
         },
         'extractor_retries': 10,
@@ -129,7 +139,7 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         'hls_prefer_native': True,
         'http_headers': {
             'User-Agent': selected_user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
@@ -142,7 +152,12 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"Windows"'
-        }
+        },
+        'youtube_include_dash_manifest': False,  # Skip DASH manifest
+        'youtube_include_hls_manifest': False,   # Skip HLS manifest
+        'prefer_insecure': True,                 # Allow fallback to insecure connections
+        'allow_unplayable_formats': True,        # Allow all formats
+        'check_formats': False,                  # Don't check formats before downloading
     }
 
     # Add random sleep between requests
@@ -154,10 +169,11 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         cookie_file = save_user_cookies(cookies_str)
         if cookie_file:
             opts['cookiefile'] = cookie_file
+            opts['cookiesfrombrowser'] = None  # Don't try to load cookies from browser when we have cookie file
 
     return opts
 
-def get_video_info(url):
+def get_video_info(url, cookies_str=None):
     try:
         logger.info(f"Getting info for URL: {url}")
         
@@ -168,9 +184,14 @@ def get_video_info(url):
             logger.info(f"Converted shorts URL to: {url}")
         
         # Add random delay
-        time.sleep(random.uniform(1, 5))  # Random delay between 1-5 seconds
+        time.sleep(random.uniform(1, 3))  # Random delay between 1-3 seconds
         
-        ydl_opts = get_yt_dlp_opts()
+        ydl_opts = get_yt_dlp_opts(cookies_str=cookies_str)
+        ydl_opts.update({
+            'extract_flat': True,  # Only extract metadata
+            'quiet': True,
+            'no_warnings': True
+        })
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -188,12 +209,15 @@ def get_video_info(url):
                         raise Exception("No videos found in playlist")
                     info = info['entries'][0]
                 
-                # Log available formats
-                if 'formats' in info:
-                    formats_list = [f"{f.get('format_id')} - {f.get('ext')} - {f.get('resolution')}" for f in info['formats']]
-                    logger.info(f"Available formats: {formats_list}")
-                else:
-                    logger.warning("No formats available in video info")
+                # Get best available format
+                formats = info.get('formats', [])
+                best_format = None
+                for f in formats:
+                    if f.get('ext') == 'mp4' and f.get('format_note') in ['720p', '1080p']:
+                        best_format = f
+                        break
+                if not best_format and formats:
+                    best_format = formats[-1]  # Get last format as it's usually the best quality
                 
                 result = {
                     'url': url,
@@ -201,19 +225,22 @@ def get_video_info(url):
                     'duration': info.get('duration', 0),
                     'thumbnail': info.get('thumbnail', None),
                     'webpage_url': info.get('webpage_url', url),
-                    'formats': info.get('formats', [])
+                    'format': f"{best_format.get('format_id', '')} - {best_format.get('resolution', '')} ({best_format.get('format_note', '')})" if best_format else 'best'
                 }
                 logger.info(f"Successfully extracted video info: {result}")
                 return result
                 
-            except Exception as e:
-                logger.error(f"Error during extraction: {str(e)}")
-                # Get detailed error info
-                if hasattr(e, 'exc_info'):
-                    logger.error(f"Exception info: {e.exc_info}")
-                if hasattr(e, 'msg'):
-                    logger.error(f"Error message: {e.msg}")
-                raise
+            except yt_dlp.utils.DownloadError as e:
+                error_msg = str(e)
+                if "Sign in to confirm your age" in error_msg:
+                    logger.error("Age-restricted video detected")
+                    raise Exception("This video is age-restricted. Please provide cookies from a logged-in account.")
+                elif "Sign in to confirm you're not a bot" in error_msg:
+                    logger.error("Bot detection triggered")
+                    raise Exception("YouTube thinks we're a bot. Please provide cookies from a logged-in account.")
+                else:
+                    logger.error(f"Download error: {error_msg}")
+                    raise
                 
     except Exception as e:
         error_msg = str(e)
@@ -237,23 +264,14 @@ def get_videos_info():
 
         for url in urls:
             try:
-                ydl_opts = get_yt_dlp_opts(cookies_str=cookies)
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    logger.info(f"Extracting info for URL: {url}")
-                    info = ydl.extract_info(url, download=False)
-                    if info:
-                        video_data = {
-                            'url': url,
-                            'title': info.get('title', 'Unknown Title'),
-                            'thumbnail': info.get('thumbnail', ''),
-                            'duration': info.get('duration', 0),
-                            'format': info.get('format', ''),
-                            'quality': info.get('quality', 0)
-                        }
-                        videos_info.append(video_data)
-                        logger.info(f"Successfully extracted info: {video_data}")
-                    else:
-                        raise Exception("No video information found")
+                info = get_video_info(url, cookies)
+                if 'error' in info:
+                    error_msg = f"Error with URL {url}: {info['error']}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                else:
+                    videos_info.append(info)
+                    logger.info(f"Successfully extracted info: {info}")
             except Exception as e:
                 error_msg = f"Error with URL {url}: {str(e)}"
                 logger.error(error_msg)
