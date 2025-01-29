@@ -107,24 +107,28 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
 ]
 
-def get_yt_dlp_opts(quality='best', cookies_str=None):
+def get_yt_dlp_opts(quality='best', cookies_str=None, is_shorts=False):
     # Randomly select a User-Agent
     selected_user_agent = random.choice(USER_AGENTS)
     
-    # Modify format strings to be more specific and reliable
-    if quality == 'highest':
-        format_string = 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4][vcodec^=avc]/mp4'
-    elif quality == '1080p':
-        format_string = 'bestvideo[height<=1080][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4][vcodec^=avc]/mp4'
-    elif quality == '720p':
-        format_string = 'bestvideo[height<=720][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=720][ext=mp4][vcodec^=avc]/mp4'
-    elif quality == '480p':
-        format_string = 'bestvideo[height<=480][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=480][ext=mp4][vcodec^=avc]/mp4'
-    elif quality == '360p':
-        format_string = 'bestvideo[height<=360][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=360][ext=mp4][vcodec^=avc]/mp4'
+    # Special format string for shorts
+    if is_shorts:
+        format_string = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b'
     else:
-        format_string = 'best[ext=mp4][vcodec^=avc]/mp4'
-    
+        # Regular format strings for normal videos
+        if quality == 'highest':
+            format_string = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b'
+        elif quality == '1080p':
+            format_string = 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4] / bv*[height<=1080]+ba/b[height<=1080]'
+        elif quality == '720p':
+            format_string = 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4] / bv*[height<=720]+ba/b[height<=720]'
+        elif quality == '480p':
+            format_string = 'bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480][ext=mp4] / bv*[height<=480]+ba/b[height<=480]'
+        elif quality == '360p':
+            format_string = 'bv*[height<=360][ext=mp4]+ba[ext=m4a]/b[height<=360][ext=mp4] / bv*[height<=360]+ba/b[height<=360]'
+        else:
+            format_string = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b'
+
     opts = {
         'format': format_string,
         'merge_output_format': 'mp4',
@@ -146,7 +150,7 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'youtube': {
                 'skip': [],
                 'player_skip': [],
-                'player_client': ['android', 'web', 'tv_embedded'],
+                'player_client': ['android', 'web', 'tv_embedded', 'mobile'],
                 'max_comments': [0],
                 'player_params': ['all'],
                 'embed_thumbnail': [True],
@@ -167,16 +171,14 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Ch-Ua-Mobile': '?0',
             'Pragma': 'no-cache',
             'Cache-Control': 'no-cache',
         },
         'youtube_include_dash_manifest': True,
         'youtube_include_hls_manifest': True,
         'prefer_insecure': True,
-        'allow_unplayable_formats': False,
-        'check_formats': True,
+        'allow_unplayable_formats': True,  # Changed to True for shorts
+        'check_formats': False,  # Changed to False for shorts
         'postprocessors': [{
             'key': 'FFmpegVideoConvertor',
             'preferedformat': 'mp4',
@@ -184,7 +186,7 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
     }
 
     # Add random sleep between requests with longer delays
-    opts['sleep_interval'] = random.randint(3, 6)  # Increased delay
+    opts['sleep_interval'] = random.randint(3, 6)
     opts['max_sleep_interval'] = 8
 
     # Add cookies if provided
@@ -193,7 +195,6 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         if cookie_file:
             opts['cookiefile'] = cookie_file
             opts['cookiesfrombrowser'] = None
-            # Add additional YouTube-specific cookie handling
             if 'youtube.com' in cookies_str:
                 opts['extractor_args']['youtube'].update({
                     'skip_webpage': [False],
@@ -208,21 +209,22 @@ def get_video_info(url, cookies_str=None):
     try:
         logger.info(f"Getting info for URL: {url}")
         
-        # For YouTube shorts, convert to regular video URL
-        if '/shorts/' in url:
+        # Check if it's a shorts URL
+        is_shorts = '/shorts/' in url
+        if is_shorts:
             video_id = url.split('/shorts/')[1].split('?')[0]
             url = f'https://www.youtube.com/watch?v={video_id}'
             logger.info(f"Converted shorts URL to: {url}")
         
         # Add random delay
-        time.sleep(random.uniform(2, 4))  # Random delay between 2-4 seconds
+        time.sleep(random.uniform(2, 4))
         
         if not cookies_str:
             logger.warning("No cookies provided. This may result in bot detection.")
             
-        ydl_opts = get_yt_dlp_opts(cookies_str=cookies_str)
+        ydl_opts = get_yt_dlp_opts(cookies_str=cookies_str, is_shorts=is_shorts)
         ydl_opts.update({
-            'extract_flat': True,  # Only extract metadata
+            'extract_flat': True,
             'quiet': True,
             'no_warnings': True
         })
@@ -246,12 +248,23 @@ def get_video_info(url, cookies_str=None):
                 # Get best available format
                 formats = info.get('formats', [])
                 best_format = None
-                for f in formats:
-                    if f.get('ext') == 'mp4' and f.get('format_note') in ['720p', '1080p']:
-                        best_format = f
-                        break
+                
+                # For shorts, prefer vertical video formats
+                if is_shorts:
+                    for f in formats:
+                        if f.get('ext') == 'mp4' and f.get('height', 0) > f.get('width', 0):
+                            best_format = f
+                            break
+                
+                # If no vertical format found or not shorts, use regular format selection
+                if not best_format:
+                    for f in formats:
+                        if f.get('ext') == 'mp4' and f.get('format_note') in ['720p', '1080p']:
+                            best_format = f
+                            break
+                
                 if not best_format and formats:
-                    best_format = formats[-1]  # Get last format as it's usually the best quality
+                    best_format = formats[-1]
                 
                 result = {
                     'url': url,
@@ -259,7 +272,8 @@ def get_video_info(url, cookies_str=None):
                     'duration': info.get('duration', 0),
                     'thumbnail': info.get('thumbnail', None),
                     'webpage_url': info.get('webpage_url', url),
-                    'format': f"{best_format.get('format_id', '')} - {best_format.get('resolution', '')} ({best_format.get('format_note', '')})" if best_format else 'best'
+                    'format': f"{best_format.get('format_id', '')} - {best_format.get('resolution', '')} ({best_format.get('format_note', '')})" if best_format else 'best',
+                    'is_shorts': is_shorts
                 }
                 logger.info(f"Successfully extracted video info: {result}")
                 return result
