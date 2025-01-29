@@ -111,19 +111,19 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
     # Randomly select a User-Agent
     selected_user_agent = random.choice(USER_AGENTS)
     
-    # Convert quality setting to yt-dlp format string
+    # Modify format strings to be more specific and reliable
     if quality == 'highest':
-        format_string = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        format_string = 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4][vcodec^=avc]/mp4'
     elif quality == '1080p':
-        format_string = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best'
+        format_string = 'bestvideo[height<=1080][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4][vcodec^=avc]/mp4'
     elif quality == '720p':
-        format_string = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best'
+        format_string = 'bestvideo[height<=720][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=720][ext=mp4][vcodec^=avc]/mp4'
     elif quality == '480p':
-        format_string = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best'
+        format_string = 'bestvideo[height<=480][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=480][ext=mp4][vcodec^=avc]/mp4'
     elif quality == '360p':
-        format_string = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
+        format_string = 'bestvideo[height<=360][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[height<=360][ext=mp4][vcodec^=avc]/mp4'
     else:
-        format_string = 'best[ext=mp4]/best'
+        format_string = 'best[ext=mp4][vcodec^=avc]/mp4'
     
     opts = {
         'format': format_string,
@@ -133,9 +133,9 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
         'verbose': True,
         'extract_flat': False,
         'socket_timeout': 30,
-        'retries': 15,  # Increased retries
-        'fragment_retries': 15,  # Increased fragment retries
-        'retry_sleep_functions': {'http': lambda n: 5 * (2 ** (n-1))},  # Exponential backoff
+        'retries': 15,
+        'fragment_retries': 15,
+        'retry_sleep_functions': {'http': lambda n: 5 * (2 ** (n-1))},
         'force_generic_extractor': False,
         'nocheckcertificate': True,
         'ignoreerrors': False,
@@ -153,12 +153,12 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
                 'innertube_key': ['AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'],
             }
         },
-        'extractor_retries': 15,  # Increased extractor retries
-        'file_access_retries': 15,  # Increased file access retries
+        'extractor_retries': 15,
+        'file_access_retries': 15,
         'hls_prefer_native': True,
         'http_headers': {
             'User-Agent': selected_user_agent,
-            'Accept': '*/*',  # Changed to accept all
+            'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
@@ -172,11 +172,11 @@ def get_yt_dlp_opts(quality='best', cookies_str=None):
             'Pragma': 'no-cache',
             'Cache-Control': 'no-cache',
         },
-        'youtube_include_dash_manifest': True,  # Changed to True
-        'youtube_include_hls_manifest': True,   # Changed to True
+        'youtube_include_dash_manifest': True,
+        'youtube_include_hls_manifest': True,
         'prefer_insecure': True,
-        'allow_unplayable_formats': True,
-        'check_formats': False,
+        'allow_unplayable_formats': False,
+        'check_formats': True,
         'postprocessors': [{
             'key': 'FFmpegVideoConvertor',
             'preferedformat': 'mp4',
@@ -341,6 +341,26 @@ def handle_download_error(error_msg, cookies_str=None):
     else:
         return f"Download error: {error_msg}"
 
+def validate_video_file(file_path):
+    """Validate that the downloaded file is a proper video file"""
+    try:
+        if not os.path.exists(file_path):
+            return False, "File does not exist"
+            
+        file_size = os.path.getsize(file_path)
+        if file_size < 1000000:  # Less than 1MB
+            return False, f"File too small ({file_size} bytes)"
+            
+        # Check if file is a valid MP4
+        with open(file_path, 'rb') as f:
+            header = f.read(8)
+            if not header.startswith(b'\x00\x00\x00') and not b'ftyp' in header:
+                return False, "Not a valid MP4 file"
+                
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
 @app.route('/api/download', methods=['POST'])
 def download_video():
     try:
@@ -381,24 +401,29 @@ def download_video():
                             logger.info(f"Starting download for URL: {url} (Attempt {retry_count + 1}/{max_retries})")
                             logger.info(f"Using format: {ydl_opts['format']}")
                             ydl.download([url])
+                            
+                            # Validate the downloaded file
+                            is_valid, error_msg = validate_video_file(output_path)
+                            if not is_valid:
+                                raise Exception(f"Invalid video file: {error_msg}")
+                                
                             break  # If successful, break the retry loop
+                            
                     except Exception as e:
                         last_error = str(e)
                         retry_count += 1
+                        # Clean up invalid file if it exists
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                            
                         if retry_count < max_retries:
                             logger.warning(f"Attempt {retry_count} failed, retrying in {5 * retry_count} seconds...")
                             time.sleep(5 * retry_count)  # Exponential backoff
                         else:
                             raise Exception(handle_download_error(last_error, cookies))
                 
-                # Verify file exists and is accessible
-                if not os.path.exists(output_path):
-                    raise Exception("Download completed but file not found")
-                
                 # Get file size
                 file_size = os.path.getsize(output_path)
-                if file_size == 0:
-                    raise Exception("Downloaded file is empty")
                 
                 # Generate download URL
                 download_url = url_for('static', filename=f'downloads/{filename}', _external=True)
@@ -420,6 +445,9 @@ def download_video():
                     'status': 'error',
                     'error': error_msg
                 })
+                # Clean up any failed download
+                if os.path.exists(output_path):
+                    os.remove(output_path)
         
         return jsonify({'results': results})
         
