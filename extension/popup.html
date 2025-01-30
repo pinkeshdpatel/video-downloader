@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bulk Video Downloader</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            width: 400px;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .progress-container {
+            display: none;
+            margin-top: 10px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress {
+            width: 0%;
+            height: 100%;
+            background-color: #4285f4;
+            transition: width 0.3s ease;
+        }
+        .status {
+            margin-top: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        #downloadList {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .download-item {
+            padding: 12px;
+            border: 1px solid #eee;
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+        .download-item.success {
+            border-left: 4px solid #4caf50;
+        }
+        .download-item.error {
+            border-left: 4px solid #f44336;
+        }
+        .download-item .url {
+            font-weight: bold;
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+        .download-item .details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .download-item .error-details {
+            margin-top: 8px;
+            padding: 8px;
+            background-color: #fff3f3;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .toggle-debug {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .debug-panel {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .debug-panel pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Bulk Video Downloader</h2>
+        <div>
+            <label for="urls">Enter Video URLs (one per line):</label>
+            <textarea id="urls" placeholder="https://youtube.com/watch?v=...&#10;https://instagram.com/p/..."></textarea>
+        </div>
+        <div>
+            <label for="quality">Select Quality:</label>
+            <select id="quality">
+                <option value="highest">Highest Quality</option>
+                <option value="1080p">1080p (or Best Available Below)</option>
+                <option value="720p">720p (or Best Available Below)</option>
+                <option value="480p">480p (or Best Available Below)</option>
+                <option value="360p">360p (or Best Available Below)</option>
+            </select>
+        </div>
+        <button id="downloadBtn">Download Videos</button>
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress"></div>
+            </div>
+            <div class="status">Preparing downloads...</div>
+        </div>
+        <div id="downloadList"></div>
+        <div class="toggle-debug" id="toggleDebug">Show Debug Information</div>
+        <div class="debug-panel" id="debugPanel" style="display: none;">
+            <pre id="debugLog"></pre>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html> 

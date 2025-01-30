@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Downloader</title>
+    <title>Video Downloader & Trimmer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -103,89 +103,195 @@
             background-color: #3b82f6;
             transition: width 0.2s;
         }
+        .tab-button {
+            padding: 0.75rem 1.5rem;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .tab-button.active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .video-preview {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            outline: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        .upload-zone {
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        
+        .upload-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
     </style>
 </head>
 <body class="min-h-screen py-8 px-4">
     <div class="container">
         <header class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-900 mb-2">Video Downloader</h1>
-            <p class="text-gray-600">Download videos from YouTube and Instagram</p>
+            <h1 class="text-4xl font-bold text-gray-900 mb-2">Video Downloader & Trimmer</h1>
+            <p class="text-gray-600">Download, trim, and compress videos</p>
         </header>
 
-        <div class="card p-6 mb-8">
-            <div class="mb-6">
-                <label for="urls" class="block text-sm font-medium text-gray-700 mb-2">
-                    Enter Video URLs
-                    <span class="text-gray-500 text-xs">(one per line)</span>
-                </label>
-                <textarea 
-                    id="urls" 
-                    class="textarea-custom"
-                    placeholder="https://youtube.com/watch?v=...&#10;https://instagram.com/p/..."
-                ></textarea>
-            </div>
-
-            <div class="mb-6">
-                <label for="cookies" class="block text-sm font-medium text-gray-700 mb-2">
-                    YouTube Cookies (Required for some videos)
-                    <span class="text-gray-500 text-xs">(paste cookies.txt content to avoid bot detection)</span>
-                </label>
-                <textarea 
-                    id="cookies" 
-                    class="textarea-custom h-24"
-                    placeholder="Paste your YouTube cookies here to improve download success rate and access age-restricted videos..."
-                ></textarea>
-                <div class="mt-2 space-y-2 text-sm text-gray-500">
-                    <p>To get your cookies:</p>
-                    <ol class="list-decimal list-inside space-y-1">
-                        <li>Install 'Get cookies.txt' extension for <a href="https://chrome.google.com/webstore/detail/get-cookiestxt/bgaddhkoddajcdgocldbbfleckgcbcid" class="text-blue-600 hover:underline" target="_blank">Chrome</a> or <a href="https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/" class="text-blue-600 hover:underline" target="_blank">Firefox</a></li>
-                        <li>Sign in to YouTube in your browser</li>
-                        <li>Click the extension icon while on YouTube</li>
-                        <li>Copy and paste the entire content here</li>
-                    </ol>
-                    <p class="text-red-600">Note: Required for age-restricted videos and to avoid bot detection</p>
-                </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-4">
-                <button id="checkUrls" class="btn btn-primary">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                    </svg>
-                    Check URLs
-                </button>
-                <button id="quickDownload" class="btn btn-success">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                    </svg>
-                    Quick Download All
-                </button>
-                <select id="quality" class="select-custom">
-                    <option value="highest">Highest Quality (Best Available)</option>
-                    <option value="1080p">1080p (or Best Available Below)</option>
-                    <option value="720p">720p (or Best Available Below)</option>
-                    <option value="480p">480p (or Best Available Below)</option>
-                    <option value="360p">360p (or Best Available Below)</option>
-                </select>
-            </div>
+        <!-- Tab Navigation -->
+        <div class="flex justify-center mb-8 border-b">
+            <button class="tab-button active" data-tab="download">Download Videos</button>
+            <button class="tab-button" data-tab="trim">Trim & Compress</button>
         </div>
 
-        <div id="messages" class="space-y-2 mb-8"></div>
+        <!-- Download Tab -->
+        <div id="download-tab" class="tab-content active">
+            <div class="card p-6 mb-8">
+                <div class="mb-6">
+                    <label for="urls" class="block text-sm font-medium text-gray-700 mb-2">
+                        Enter Video URLs
+                        <span class="text-gray-500 text-xs">(one per line)</span>
+                    </label>
+                    <textarea 
+                        id="urls" 
+                        class="textarea-custom"
+                        placeholder="https://youtube.com/watch?v=...&#10;https://instagram.com/p/..."
+                    ></textarea>
+                </div>
 
-        <div id="downloadSection" class="hidden">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-semibold text-gray-900">Available Videos</h2>
-                <div class="flex items-center gap-4">
-                    <span id="selectedCount" class="text-gray-600 text-sm font-medium">0 videos selected</span>
-                    <button id="downloadSelected" class="btn btn-success" disabled>
+                <div class="mb-6">
+                    <label for="cookies" class="block text-sm font-medium text-gray-700 mb-2">
+                        YouTube Cookies (Required for some videos)
+                        <span class="text-gray-500 text-xs">(paste cookies.txt content to avoid bot detection)</span>
+                    </label>
+                    <textarea 
+                        id="cookies" 
+                        class="textarea-custom h-24"
+                        placeholder="Paste your YouTube cookies here to improve download success rate and access age-restricted videos..."
+                    ></textarea>
+                    <div class="mt-2 space-y-2 text-sm text-gray-500">
+                        <p>To get your cookies:</p>
+                        <ol class="list-decimal list-inside space-y-1">
+                            <li>Install 'Get cookies.txt' extension for <a href="https://chrome.google.com/webstore/detail/get-cookiestxt/bgaddhkoddajcdgocldbbfleckgcbcid" class="text-blue-600 hover:underline" target="_blank">Chrome</a> or <a href="https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/" class="text-blue-600 hover:underline" target="_blank">Firefox</a></li>
+                            <li>Sign in to YouTube in your browser</li>
+                            <li>Click the extension icon while on YouTube</li>
+                            <li>Copy and paste the entire content here</li>
+                        </ol>
+                        <p class="text-red-600">Note: Required for age-restricted videos and to avoid bot detection</p>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-4">
+                    <button id="checkUrls" class="btn btn-primary">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                        </svg>
+                        Check URLs
+                    </button>
+                    <button id="quickDownload" class="btn btn-success">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                             <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
                         </svg>
-                        Download Selected
+                        Quick Download All
                     </button>
+                    <select id="quality" class="select-custom">
+                        <option value="highest">Highest Quality (Best Available)</option>
+                        <option value="1080p">1080p (or Best Available Below)</option>
+                        <option value="720p">720p (or Best Available Below)</option>
+                        <option value="480p">480p (or Best Available Below)</option>
+                        <option value="360p">360p (or Best Available Below)</option>
+                    </select>
                 </div>
             </div>
-            <div id="videoList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+
+            <div id="messages" class="space-y-2 mb-8"></div>
+
+            <div id="downloadSection" class="hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-semibold text-gray-900">Available Videos</h2>
+                    <div class="flex items-center gap-4">
+                        <span id="selectedCount" class="text-gray-600 text-sm font-medium">0 videos selected</span>
+                        <button id="downloadSelected" class="btn btn-success" disabled>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                            </svg>
+                            Download Selected
+                        </button>
+                    </div>
+                </div>
+                <div id="videoList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+            </div>
+        </div>
+
+        <!-- Trim & Compress Tab -->
+        <div id="trim-tab" class="tab-content">
+            <div class="card p-6 mb-8">
+                <div class="upload-zone" id="uploadZone">
+                    <div class="mb-4">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        <p class="mt-1 text-sm text-gray-600">
+                            Drag and drop videos here or click to select
+                        </p>
+                        <input type="file" id="videoInput" multiple accept="video/*" class="hidden">
+                    </div>
+                </div>
+
+                <div id="videoControls" class="mt-6" style="display: none;">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Trim Duration (max 15 seconds)</label>
+                        <div class="flex items-center gap-4">
+                            <input type="number" id="startTime" min="0" step="0.1" class="w-24 p-2 border rounded" placeholder="Start">
+                            <span class="text-gray-500">to</span>
+                            <input type="number" id="endTime" min="0" step="0.1" class="w-24 p-2 border rounded" placeholder="End">
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Target File Size (MB)</label>
+                        <input type="number" id="targetSize" min="1" class="w-full p-2 border rounded" placeholder="Enter target size in MB">
+                    </div>
+
+                    <button id="processVideos" class="btn btn-primary w-full">
+                        Process Videos
+                    </button>
+                </div>
+
+                <div id="processingResults" class="mt-6">
+                    <!-- Results will be displayed here -->
+                </div>
+            </div>
         </div>
     </div>
 
@@ -560,6 +666,220 @@
             downloadSelectedButton.disabled = false;
             downloadSelectedButton.textContent = 'Download Selected';
         });
+
+        // Tab switching logic
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                // Remove active class from all tabs
+                document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                // Add active class to clicked tab
+                button.classList.add('active');
+                document.getElementById(`${button.dataset.tab}-tab`).classList.add('active');
+            });
+        });
+
+        // Video upload and processing logic
+        const uploadZone = document.getElementById('uploadZone');
+        const videoInput = document.getElementById('videoInput');
+        const videoControls = document.getElementById('videoControls');
+        const processingResults = document.getElementById('processingResults');
+        const processVideosBtn = document.getElementById('processVideos');
+
+        // Handle drag and drop
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        uploadZone.addEventListener('click', () => {
+            videoInput.click();
+        });
+
+        videoInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                videoControls.style.display = 'block';
+                // Preview first video
+                const video = document.createElement('video');
+                video.src = URL.createObjectURL(files[0]);
+                video.classList.add('video-preview');
+                video.controls = true;
+                
+                // Replace existing preview if any
+                const existingPreview = uploadZone.querySelector('video');
+                if (existingPreview) {
+                    uploadZone.replaceChild(video, existingPreview);
+                } else {
+                    uploadZone.appendChild(video);
+                }
+            }
+        }
+
+        processVideosBtn.addEventListener('click', async () => {
+            const files = videoInput.files;
+            if (!files.length) {
+                alert('Please select at least one video');
+                return;
+            }
+
+            const startTime = parseFloat(document.getElementById('startTime').value) || 0;
+            const endTime = parseFloat(document.getElementById('endTime').value) || 15;
+            const targetSize = document.getElementById('targetSize').value;
+
+            if (endTime - startTime > 15) {
+                alert('Maximum trim duration is 15 seconds');
+                return;
+            }
+
+            const formData = new FormData();
+            for (let file of files) {
+                formData.append('videos[]', file);
+            }
+            formData.append('start_time', startTime);
+            formData.append('end_time', endTime);
+            if (targetSize) {
+                formData.append('target_size', targetSize);
+            }
+
+            processVideosBtn.disabled = true;
+            processVideosBtn.textContent = 'Processing...';
+
+            try {
+                const response = await fetch('/api/upload-videos', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                displayResults(data.results);
+            } catch (error) {
+                alert('Error processing videos: ' + error.message);
+            } finally {
+                processVideosBtn.disabled = false;
+                processVideosBtn.textContent = 'Process Videos';
+            }
+        });
+
+        function displayResults(results) {
+            processingResults.innerHTML = '';
+            
+            results.forEach(result => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = `p-4 mb-2 rounded-lg ${result.status === 'success' ? 'bg-green-100' : 'bg-red-100'}`;
+                
+                // Add progress bar container
+                const progressContainer = document.createElement('div');
+                progressContainer.className = 'mt-2';
+                progressContainer.innerHTML = `
+                    <div class="relative pt-1">
+                        <div class="flex mb-2 items-center justify-between">
+                            <div>
+                                <span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200" id="status-${result.task_id}">
+                                    Processing...
+                                </span>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-xs font-semibold inline-block text-blue-600" id="progress-text-${result.task_id}">
+                                    0%
+                                </span>
+                            </div>
+                        </div>
+                        <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
+                            <div id="progress-bar-${result.task_id}" 
+                                 class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500"
+                                 style="width: 0%">
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-600" id="message-${result.task_id}"></div>
+                    </div>
+                `;
+                
+                if (result.status === 'success') {
+                    resultDiv.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium text-green-700">${result.filename}</span>
+                            <a href="${result.download_url}" 
+                               class="btn btn-success text-sm py-1 px-3" 
+                               download>Download</a>
+                        </div>
+                    `;
+                    resultDiv.appendChild(progressContainer);
+                    
+                    // Start progress tracking
+                    trackProgress(result.task_id);
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="text-red-700">
+                            <span class="font-medium">${result.filename}</span>: ${result.error}
+                        </div>
+                    `;
+                }
+                
+                processingResults.appendChild(resultDiv);
+            });
+        }
+
+        async function trackProgress(taskId) {
+            const progressBar = document.getElementById(`progress-bar-${taskId}`);
+            const progressText = document.getElementById(`progress-text-${taskId}`);
+            const statusText = document.getElementById(`status-${taskId}`);
+            const messageText = document.getElementById(`message-${taskId}`);
+            
+            const updateProgress = async () => {
+                try {
+                    const response = await fetch(`/api/progress/${taskId}`);
+                    const data = await response.json();
+                    
+                    progressBar.style.width = `${data.progress}%`;
+                    progressText.textContent = `${Math.round(data.progress)}%`;
+                    
+                    if (data.status) {
+                        statusText.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                        statusText.className = `text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full ${getStatusClass(data.status)}`;
+                    }
+                    
+                    if (data.message) {
+                        messageText.textContent = data.message;
+                    }
+                    
+                    if (data.status !== 'completed' && data.status !== 'error') {
+                        setTimeout(updateProgress, 1000);
+                    }
+                } catch (error) {
+                    console.error('Error tracking progress:', error);
+                }
+            };
+            
+            await updateProgress();
+        }
+
+        function getStatusClass(status) {
+            switch (status) {
+                case 'processing':
+                    return 'text-blue-600 bg-blue-200';
+                case 'completed':
+                    return 'text-green-600 bg-green-200';
+                case 'error':
+                    return 'text-red-600 bg-red-200';
+                default:
+                    return 'text-gray-600 bg-gray-200';
+            }
+        }
     </script>
 </body>
 </html>

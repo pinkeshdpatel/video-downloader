@@ -1,87 +1,82 @@
-# Video Downloader
+# Video Downloader & Trimmer
 
-A web application for downloading videos from YouTube and Instagram. Built with Flask and modern web technologies.
+A web application that allows users to download videos from YouTube and Instagram, as well as trim and compress local videos.
 
 ## Features
 
 - Download videos from YouTube and Instagram
-- Select video quality
-- Multiple video download support
-- Progress tracking
+- Trim videos to specific durations (max 15 seconds)
+- Compress videos to target file sizes
+- Bulk video processing
+- Real-time progress tracking
+- Support for multiple video formats
 - Modern, responsive UI
 
-## Local Development
+## Requirements
+
+- Python 3.8+
+- FFmpeg
+- Chrome/Firefox for the best experience
+
+## Installation
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
-cd video-downloader
+git clone https://github.com/yourusername/video-downloader-trimmer.git
+cd video-downloader-trimmer
 ```
 
-2. Create a virtual environment:
+2. Create a virtual environment and activate it:
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+3. Install the required packages:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Run the application:
+4. Install FFmpeg:
+- On macOS: `brew install ffmpeg`
+- On Ubuntu/Debian: `sudo apt-get install ffmpeg`
+- On Windows: Download from [FFmpeg website](https://ffmpeg.org/download.html)
+
+## Usage
+
+1. Start the server:
 ```bash
 python app.py
 ```
 
-The application will be available at `http://localhost:5000`
+2. Open your browser and navigate to `http://localhost:5000`
 
-## Deployment
+3. Use the application:
+   - To download videos: Paste video URLs in the download tab
+   - To trim/compress videos: Upload videos in the trim tab
 
-### Prerequisites
+## Development
 
-- Python 3.9+
-- Git
-- Heroku CLI (for Heroku deployment)
+The project structure is organized as follows:
 
-### Deploying to Heroku
-
-1. Create a Heroku account at https://signup.heroku.com/
-
-2. Install Heroku CLI and login:
-```bash
-heroku login
+```
+.
+├── app.py              # Main Flask application
+├── requirements.txt    # Python dependencies
+├── static/            # Static files (CSS, downloads, uploads)
+├── templates/         # HTML templates
+│   └── index.html    # Main application template
+└── README.md         # This file
 ```
 
-3. Create a new Heroku app:
-```bash
-heroku create your-app-name
-```
+## Contributing
 
-4. Push to Heroku:
-```bash
-git push heroku main
-```
-
-5. Ensure at least one instance is running:
-```bash
-heroku ps:scale web=1
-```
-
-### Environment Variables
-
-Set the following environment variables in your deployment:
-
-- `SECRET_KEY`: A secret key for Flask sessions
-- `DOWNLOAD_FOLDER`: Path to store downloaded videos temporarily
-
-### Security Notes
-
-- The application uses temporary storage for downloads
-- Files are cleaned up after download
-- Rate limiting is recommended for production use
-- Consider implementing user authentication for public deployment
+1. Fork the repository
+2. Create a new branch for your feature
+3. Commit your changes
+4. Push to your branch
+5. Create a Pull Request
 
 ## License
 
-MIT License - See LICENSE file for details
+This project is licensed under the MIT License - see the LICENSE file for details.

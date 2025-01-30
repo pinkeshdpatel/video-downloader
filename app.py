@@ -9,6 +9,8 @@ from functools import partial
 import threading
 import random
 import tempfile
+from moviepy.editor import VideoFileClip
+import ffmpeg
 
 # Set up logging
 logging.basicConfig(
@@ -29,6 +31,13 @@ DOWNLOAD_FOLDER = os.getenv('DOWNLOAD_FOLDER', os.path.join(os.path.dirname(os.p
 TEMP_FOLDER = os.getenv('TEMP_FOLDER', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp'))
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+# Constants for video processing
+UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads'))
+MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB max upload size
+ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm'}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Clean up old downloads and temp files periodically
 def cleanup_files():
@@ -545,6 +554,115 @@ def handle_progress(d, filename):
             'status': 'error',
             'error': str(d.get('error', 'Unknown error'))
         }
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def process_video(input_path, output_path, start_time, end_time, target_size=None, max_duration=15):
+    try:
+        # Load the video
+        video = VideoFileClip(input_path)
+        
+        # Ensure video doesn't exceed max duration
+        if end_time - start_time > max_duration:
+            end_time = start_time + max_duration
+        
+        # Trim the video
+        video = video.subclip(start_time, end_time)
+        
+        if target_size:
+            # Calculate target bitrate based on desired file size
+            duration = end_time - start_time
+            target_bitrate = (target_size * 8) / duration  # Convert size to bits and divide by duration
+            
+            # Use ffmpeg-python for compression
+            stream = ffmpeg.input(input_path)
+            stream = ffmpeg.output(stream, output_path,
+                                 **{'c:v': 'libx264',
+                                    'b:v': f'{target_bitrate}k',
+                                    'maxrate': f'{target_bitrate * 1.5}k',
+                                    'bufsize': f'{target_bitrate * 3}k',
+                                    'c:a': 'aac',
+                                    'b:a': '128k',
+                                    'ss': str(start_time),
+                                    't': str(end_time - start_time)})
+            ffmpeg.run(stream, overwrite_output=True)
+        else:
+            # Just trim without compression
+            video.write_videofile(output_path, codec='libx264', audio_codec='aac')
+        
+        video.close()
+        return True, None
+        
+    except Exception as e:
+        return False, str(e)
+
+@app.route('/api/upload-videos', methods=['POST'])
+def upload_videos():
+    try:
+        if 'videos[]' not in request.files:
+            return jsonify({'error': 'No videos provided'}), 400
+            
+        files = request.files.getlist('videos[]')
+        start_time = float(request.form.get('start_time', 0))
+        end_time = float(request.form.get('end_time', 15))
+        target_size = request.form.get('target_size')  # In MB
+        
+        if target_size:
+            target_size = float(target_size) * 1024 * 1024  # Convert MB to bytes
+        
+        results = []
+        
+        for file in files:
+            if file and allowed_file(file.filename):
+                # Generate unique filename
+                filename = f"upload_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
+                input_path = os.path.join(UPLOAD_FOLDER, f"input_{filename}")
+                output_path = os.path.join(UPLOAD_FOLDER, filename)
+                
+                # Save uploaded file
+                file.save(input_path)
+                
+                # Process the video
+                success, error = process_video(
+                    input_path, 
+                    output_path, 
+                    start_time, 
+                    end_time, 
+                    target_size
+                )
+                
+                # Clean up input file
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                
+                if success:
+                    # Generate download URL
+                    download_url = url_for('static', 
+                                         filename=f'uploads/{filename}', 
+                                         _external=True)
+                    results.append({
+                        'filename': file.filename,
+                        'status': 'success',
+                        'download_url': download_url
+                    })
+                else:
+                    results.append({
+                        'filename': file.filename,
+                        'status': 'error',
+                        'error': error
+                    })
+            else:
+                results.append({
+                    'filename': file.filename,
+                    'status': 'error',
+                    'error': 'Invalid file type'
+                })
+        
+        return jsonify({'results': results})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Get port from environment variable (Render sets this)
